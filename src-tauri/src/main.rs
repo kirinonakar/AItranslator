@@ -872,9 +872,31 @@ fn get_output_dir() -> Result<PathBuf, String> {
 fn write_text_to_temp(text: &str, file_name: &str) -> Result<String, String> {
     let safe_name = sanitize_file_name(file_name);
     let output_dir = get_output_dir()?;
-    let path = output_dir.join(safe_name);
+    let final_name = get_next_filename(&output_dir, &safe_name);
+    let path = output_dir.join(final_name);
     fs::write(&path, text).map_err(|error| error.to_string())?;
     Ok(path.to_string_lossy().into_owned())
+}
+
+fn get_next_filename(output_dir: &Path, file_name: &str) -> String {
+    let path = Path::new(file_name);
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("output");
+    let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("txt");
+
+    let mut counter = 1;
+    loop {
+        let candidate = format!("{}{:03}.{}", stem, counter, extension);
+        if !output_dir.join(&candidate).exists() {
+            return candidate;
+        }
+        counter += 1;
+        if counter > 999 {
+            return format!("{}_{}.{}", stem, counter, extension);
+        }
+    }
 }
 
 #[tauri::command]

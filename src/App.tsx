@@ -975,7 +975,7 @@ function App() {
               onStop={() => cancelTask("text")}
               onPaste={() => pasteText("text")}
               onCopy={() => copyText(outputText)}
-              onSave={() => saveText(outputText, "translation_translated.txt", setTextPath)}
+              onSave={() => saveText(outputText, "translated.txt", setTextPath)}
               savedPath={textPath}
             />
           )}
@@ -1080,7 +1080,7 @@ function App() {
               onStop={() => cancelTask("summary")}
               onPaste={() => pasteText("summary")}
               onCopy={() => copyText(summaryOutput)}
-              onSave={() => saveText(summaryOutput, "summary_translated.txt", setSummaryPath)}
+              onSave={() => saveText(summaryOutput, "summary.txt", setSummaryPath)}
               savedPath={summaryPath}
             />
           )}

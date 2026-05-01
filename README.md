@@ -144,7 +144,6 @@ Translated and saved files are stored in the `./output` directory within the pro
 
 ```text
 .
-├── app.py                 # Original Gradio implementation
 ├── index.html             # Vite entry HTML
 ├── output/                # Translated and saved files
 ├── package.json           # Frontend and Tauri scripts

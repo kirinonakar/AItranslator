@@ -1,4 +1,4 @@
-import { defaultWindowIcon, setTheme as setTauriAppTheme } from "@tauri-apps/api/app";
+import { defaultWindowIcon } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import type { UnlistenFn } from "@tauri-apps/api/event";
@@ -430,8 +430,7 @@ function App() {
     localStorage.setItem("theme", theme);
 
     if (!isTauriRuntime()) return;
-
-    void Promise.all([setTauriAppTheme(theme), getCurrentWindow().setTheme(theme)]).catch(() => undefined);
+    void getCurrentWindow().setTheme(theme).catch(() => undefined);
   }, [theme]);
 
   useEffect(() => {
@@ -976,7 +975,7 @@ function App() {
               onStop={() => cancelTask("text")}
               onPaste={() => pasteText("text")}
               onCopy={() => copyText(outputText)}
-              onSave={() => saveText(outputText, "translation.txt", setTextPath)}
+              onSave={() => saveText(outputText, "translation_translated.txt", setTextPath)}
               savedPath={textPath}
             />
           )}
@@ -1016,6 +1015,11 @@ function App() {
                 <span>{fileContent ? `${fileContent.length.toLocaleString()} characters` : "Waiting for text file"}</span>
               </div>
 
+              <label className="field fill">
+                <span>Translation Preview</span>
+                <textarea value={filePreview} onChange={(event) => setFilePreview(event.target.value)} />
+              </label>
+
               <div className="control-grid">
                 <label className="field">
                   <span>Chunk Size (Characters)</span>
@@ -1047,12 +1051,11 @@ function App() {
                   <Copy size={16} />
                   Copy Preview
                 </button>
+                <button className="secondary-button" type="button" onClick={() => void callTauri("open_output_folder")}>
+                  <FolderOpen size={16} />
+                  Open Folder
+                </button>
               </div>
-
-              <label className="field fill">
-                <span>Translation Preview</span>
-                <textarea value={filePreview} onChange={(event) => setFilePreview(event.target.value)} rows={18} />
-              </label>
 
               {filePath && <PathBanner label="Translated file" path={filePath} />}
             </div>
@@ -1077,7 +1080,7 @@ function App() {
               onStop={() => cancelTask("summary")}
               onPaste={() => pasteText("summary")}
               onCopy={() => copyText(summaryOutput)}
-              onSave={() => saveText(summaryOutput, "summary.txt", setSummaryPath)}
+              onSave={() => saveText(summaryOutput, "summary_translated.txt", setSummaryPath)}
               savedPath={summaryPath}
             />
           )}
@@ -1151,11 +1154,11 @@ function ModePanel({
       <div className="text-grid">
         <label className="field fill">
           <span>{inputLabel}</span>
-          <textarea value={inputValue} onChange={(event) => onInputChange(event.target.value)} placeholder={inputPlaceholder} rows={17} />
+          <textarea value={inputValue} onChange={(event) => onInputChange(event.target.value)} placeholder={inputPlaceholder} />
         </label>
         <label className="field fill">
           <span>{outputLabel}</span>
-          <textarea value={outputValue} onChange={(event) => onOutputChange(event.target.value)} rows={17} />
+          <textarea value={outputValue} onChange={(event) => onOutputChange(event.target.value)} />
         </label>
       </div>
 
@@ -1191,6 +1194,10 @@ function ModePanel({
         <button className="secondary-button" type="button" onClick={onCopy} disabled={!outputValue.trim()}>
           <Copy size={16} />
           Copy
+        </button>
+        <button className="secondary-button" type="button" onClick={() => void callTauri("open_output_folder")}>
+          <FolderOpen size={16} />
+          Open Folder
         </button>
       </div>
 

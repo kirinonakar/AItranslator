@@ -9,7 +9,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     sync::Mutex,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 use tauri::{AppHandle, Emitter, State};
 
@@ -860,15 +860,34 @@ fn format_stream_error(
     format!("\n[Error {action} chunk {chunk_number}: {error}]\n\n{context}")
 }
 
+fn get_output_dir() -> Result<PathBuf, String> {
+    let base_dir = std::env::current_dir().map_err(|error| error.to_string())?;
+    let output_dir = base_dir.join("output");
+    if !output_dir.exists() {
+        fs::create_dir_all(&output_dir).map_err(|error| error.to_string())?;
+    }
+    Ok(output_dir)
+}
+
 fn write_text_to_temp(text: &str, file_name: &str) -> Result<String, String> {
     let safe_name = sanitize_file_name(file_name);
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|error| error.to_string())?
-        .as_millis();
-    let path = std::env::temp_dir().join(format!("{timestamp}_{safe_name}"));
+    let output_dir = get_output_dir()?;
+    let path = output_dir.join(safe_name);
     fs::write(&path, text).map_err(|error| error.to_string())?;
     Ok(path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn open_output_folder() -> Result<(), String> {
+    let output_dir = get_output_dir()?;
+    #[cfg(windows)]
+    {
+        std::process::Command::new("explorer")
+            .arg(output_dir)
+            .spawn()
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 fn translated_file_name(original_file_name: Option<&str>) -> String {
@@ -885,7 +904,7 @@ fn translated_file_name(original_file_name: Option<&str>) -> String {
         .extension()
         .and_then(|value| value.to_str())
         .unwrap_or("txt");
-    format!("translated_{stem}.{extension}")
+    format!("{stem}_translated.{extension}")
 }
 
 fn is_supported_text_file(path: &Path) -> bool {
@@ -968,6 +987,7 @@ fn main() {
             read_clipboard_text,
             write_clipboard_text,
             read_dropped_text_file,
+            open_output_folder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

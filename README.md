@@ -1,6 +1,6 @@
 # AI Universal Translator
 
-AI Universal Translator is a desktop translation and summarization app built with Tauri, Rust, TypeScript, and React. It ports the original Gradio-based `app.py` workflow into a native desktop-style interface with light and dark themes.
+AI Universal Translator is a desktop translation and summarization app built with Tauri, Rust, TypeScript, and React.
 
 The app supports OpenAI-compatible chat completion APIs, including local LM Studio servers and Google's Gemini OpenAI-compatible endpoint.
 

@@ -68,8 +68,11 @@ button {
 }
 
 .app-shell {
-  min-height: 100vh;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
   padding: 20px;
+  overflow: hidden;
 }
 
 .topbar {
@@ -78,6 +81,7 @@ button {
   justify-content: flex-start;
   gap: 16px;
   margin: 0 0 14px;
+  flex: 0 0 auto;
 }
 
 .brand-lockup {
@@ -129,16 +133,19 @@ button {
 .workspace {
   display: grid;
   grid-template-columns: minmax(290px, 360px) minmax(0, 1fr);
-  align-items: start;
+  align-items: stretch;
   gap: 18px;
-  max-width: 1480px;
+  max-width: 100%;
   margin: 0 auto;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
 }
 
 .left-rail {
-  display: grid;
-  gap: 0;
-  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .settings-panel,
@@ -150,8 +157,12 @@ button {
 }
 
 .settings-panel {
-  align-self: start;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
   padding: 16px;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .panel-section + .panel-section {
@@ -386,8 +397,9 @@ button:disabled {
 }
 
 .tool-panel {
-  align-self: start;
-  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -399,6 +411,7 @@ button:disabled {
   padding: 10px;
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--surface-alt) 60%, transparent);
+  flex: 0 0 auto;
 }
 
 .tabs button {
@@ -432,20 +445,34 @@ button:disabled {
 }
 
 .mode-panel {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 16px;
   padding: 16px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .text-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  align-items: start;
+  align-items: stretch;
   gap: 16px;
+  flex: 1;
+  min-height: 0;
 }
 
 .fill {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
   min-height: 0;
+}
+
+.fill textarea {
+  flex: 1;
+  min-height: 100px;
 }
 
 .control-grid {

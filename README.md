@@ -4,6 +4,8 @@ AI Universal Translator is a desktop translation and summarization app built wit
 
 The app supports OpenAI-compatible chat completion APIs, including local LM Studio servers and Google's Gemini OpenAI-compatible endpoint.
 
+![UI Preview](screenshot.png)
+
 ## Features
 
 - Text translation with streaming output

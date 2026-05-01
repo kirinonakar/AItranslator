@@ -13,12 +13,14 @@ The app supports OpenAI-compatible chat completion APIs, including local LM Stud
 - UTF-8 text file translation
 - Automatic chunking for long text and large files
 - LM Studio and Google provider modes
-- LM Studio model list sync from `/models`
+- LM Studio model list auto-sync from `/models`
 - Google API key auto-load from `gemini.txt`
 - Source language auto-detection option
 - Adjustable temperature and chunk size
 - Stop/cancel controls for running tasks
 - Copy, paste, and save result actions
+- Automatic sequential file naming (e.g., `translated001.txt`)
+- Open local `./output` folder directly from the app
 - Light and dark theme toggle
 
 ## Tech Stack
@@ -138,7 +140,7 @@ The file translation view accepts UTF-8 text-based files:
 - `.json`
 - `.csv`
 
-Translated files are saved to the system temporary directory.
+Translated and saved files are stored in the `./output` directory within the project folder. The app automatically increments filenames (e.g., `filename001.txt`, `filename002.txt`) to prevent overwriting existing results.
 
 ## Project Structure
 
@@ -146,6 +148,7 @@ Translated files are saved to the system temporary directory.
 .
 ├── app.py                 # Original Gradio implementation
 ├── index.html             # Vite entry HTML
+├── output/                # Translated and saved files
 ├── package.json           # Frontend and Tauri scripts
 ├── src/                   # React + TypeScript frontend
 │   ├── App.tsx

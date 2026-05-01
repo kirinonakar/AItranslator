@@ -95,8 +95,6 @@ npm run tauri:build
 3. Confirm the server is available at `http://localhost:1234/v1`.
 4. Click the model sync button in the app to fetch available models.
 
-The app uses `lm-studio` as the default local API key, matching the original Python app behavior.
-
 ### Google Gemini
 
 You can enter the API key in the app, or place it in a `gemini.txt` file at the project root. When the app starts, it attempts to load that key automatically.

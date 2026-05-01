@@ -1017,7 +1017,7 @@ function App() {
 
               <label className="field fill">
                 <span>Translation Preview</span>
-                <textarea value={filePreview} onChange={(event) => setFilePreview(event.target.value)} />
+                <textarea spellCheck="false" value={filePreview} onChange={(event) => setFilePreview(event.target.value)} />
               </label>
 
               <div className="control-grid">
@@ -1154,11 +1154,11 @@ function ModePanel({
       <div className="text-grid">
         <label className="field fill">
           <span>{inputLabel}</span>
-          <textarea value={inputValue} onChange={(event) => onInputChange(event.target.value)} placeholder={inputPlaceholder} />
+          <textarea spellCheck="false" value={inputValue} onChange={(event) => onInputChange(event.target.value)} placeholder={inputPlaceholder} />
         </label>
         <label className="field fill">
           <span>{outputLabel}</span>
-          <textarea value={outputValue} onChange={(event) => onOutputChange(event.target.value)} />
+          <textarea spellCheck="false" value={outputValue} onChange={(event) => onOutputChange(event.target.value)} />
         </label>
       </div>
 

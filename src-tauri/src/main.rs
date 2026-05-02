@@ -116,6 +116,10 @@ fn load_gemini_api_key_from_file() -> String {
 
 fn normalize_google_api_key(value: &str) -> String {
     let trimmed = value.trim();
+    if trimmed == "\"\"" || trimmed == "''" {
+        return String::new();
+    }
+
     match trimmed.get(..BEARER_PREFIX.len()) {
         Some(prefix) if prefix.eq_ignore_ascii_case(BEARER_PREFIX) => trimmed
             .get(BEARER_PREFIX.len()..)
@@ -159,6 +163,7 @@ fn read_credential_api_key(target: &str) -> Result<Option<String>, String> {
 
     let api_key = normalize_google_api_key(&raw_key);
     if api_key.is_empty() {
+        let _ = delete_credential(target);
         Ok(None)
     } else {
         Ok(Some(api_key))
@@ -1183,9 +1188,6 @@ fn candidate_paths(file_name: &str) -> Vec<PathBuf> {
 
     if let Ok(current_dir) = std::env::current_dir() {
         paths.push(current_dir.join(file_name));
-        if let Some(parent) = current_dir.parent() {
-            paths.push(parent.join(file_name));
-        }
     }
 
     if let Ok(exe) = std::env::current_exe() {

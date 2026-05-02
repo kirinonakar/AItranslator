@@ -12,6 +12,8 @@ use std::{
     time::Duration,
 };
 use tauri::{AppHandle, Emitter, State};
+use regex::Regex;
+
 
 #[cfg(windows)]
 use windows_sys::Win32::{
@@ -827,7 +829,7 @@ async fn read_streaming_response(
                         task_id: task_id.to_string(),
                         target: target.to_string(),
                         status: "output".to_string(),
-                        output: Some(format!("{full_prefix}{chunk_output}")),
+                        output: Some(format!("{full_prefix}{}", filter_thoughts(&chunk_output))),
                         progress: None,
                         output_path: None,
                         error: None,
@@ -843,8 +845,25 @@ async fn read_streaming_response(
         }
     }
 
-    Ok(StreamRead::Completed(chunk_output))
+        Ok(StreamRead::Completed(filter_thoughts(&chunk_output)))
 }
+
+fn filter_thoughts(text: &str) -> String {
+    // Rust's regex crate does not support backreferences (\1). 
+    // We must match each tag pair explicitly.
+    
+    // 1. Remove closed blocks: <thought>...</thought> or <think>...</think>
+    let closed_re = Regex::new(r"(?s)<thought>.*?</thought>|<think>.*?</think>").unwrap();
+    let intermediate = closed_re.replace_all(text, "");
+
+    // 2. Remove unclosed blocks (active thinking): <thought>... or <think>... until end of string
+    let unclosed_re = Regex::new(r"(?s)<thought>.*$|<think>.*$").unwrap();
+    let final_output = unclosed_re.replace_all(&intermediate, "");
+
+    final_output.trim().to_string()
+}
+
+
 
 fn parse_sse_delta(line: &str) -> Result<Option<String>, String> {
     let line = line.trim();

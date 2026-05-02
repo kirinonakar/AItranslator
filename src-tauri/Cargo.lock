@@ -23,6 +23,7 @@ version = "0.1.0"
 dependencies = [
  "clipboard-win",
  "futures-util",
+ "regex",
  "reqwest 0.12.28",
  "serde",
  "serde_json",

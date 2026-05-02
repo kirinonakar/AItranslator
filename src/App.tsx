@@ -72,6 +72,8 @@ const callTauri = async <T,>(command: string, args?: Record<string, unknown>) =>
   return invoke<T>(command, args);
 };
 
+const normalizeApiKey = (value?: string) => value?.trim().replace(/^Bearer\s+/i, "").trim() ?? "";
+
 const readClipboardText = () => {
   if (isTauriRuntime()) return callTauri<string>("read_clipboard_text");
   return navigator.clipboard.readText();
@@ -195,7 +197,7 @@ const splitTextIntoChunks = (text: string, maxChunkSize: number) => {
 };
 
 const postBrowserChatCompletion = async (request: AiRequest, prompt: string, stream: boolean, signal?: AbortSignal) => {
-  const apiKey = request.provider === "Google" ? request.apiKey : DEFAULT_LM_API_KEY;
+  const apiKey = request.provider === "Google" ? normalizeApiKey(request.apiKey) : DEFAULT_LM_API_KEY;
   const response = await fetch("/__chat_completions", {
     method: "POST",
     headers: {
@@ -374,6 +376,7 @@ function App() {
   const [theme, setTheme] = useState<Theme>(readInitialTheme);
   const [provider, setProvider] = useState<Provider>("LM Studio");
   const [apiKey, setApiKey] = useState("");
+  const [hasLoadedApiKey, setHasLoadedApiKey] = useState(!isTauriRuntime());
   const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL);
   const [models, setModels] = useState(LM_STUDIO_MODELS);
   const [modelName, setModelName] = useState(LM_STUDIO_MODELS[0]);
@@ -412,6 +415,7 @@ function App() {
   const summaryTaskId = useRef("");
   const browserTaskControllers = useRef<Partial<Record<TabId, AbortController>>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const savedApiKeyRef = useRef("");
 
   const baseRequest = useMemo(
     () => ({
@@ -448,9 +452,39 @@ function App() {
     if (!isTauriRuntime()) return;
 
     callTauri<string>("load_gemini_api_key")
-      .then((key) => setApiKey(key))
-      .catch(() => setApiKey(""));
+      .then((key) => {
+        const normalized = normalizeApiKey(key);
+        savedApiKeyRef.current = normalized;
+        setApiKey(normalized);
+      })
+      .catch(() => {
+        savedApiKeyRef.current = "";
+        setApiKey("");
+      })
+      .finally(() => setHasLoadedApiKey(true));
   }, []);
+
+  useEffect(() => {
+    if (!isTauriRuntime() || !hasLoadedApiKey) return;
+
+    const normalized = normalizeApiKey(apiKey);
+    if (normalized === savedApiKeyRef.current) return;
+
+    const timer = window.setTimeout(() => {
+      callTauri<void>("save_gemini_api_key", { apiKey: normalized })
+        .then(() => {
+          savedApiKeyRef.current = normalized;
+          if (provider === "Google") {
+            setNotice(normalized ? "Google API key saved to Windows Credential Manager." : "Google API key removed from Windows Credential Manager.");
+          }
+        })
+        .catch((error) => {
+          if (provider === "Google") setNotice(`API key save failed: ${String(error)}`);
+        });
+    }, 500);
+
+    return () => window.clearTimeout(timer);
+  }, [apiKey, hasLoadedApiKey, provider]);
 
   useEffect(() => {
     if (provider === "Google") {
@@ -879,7 +913,7 @@ function App() {
                 <label className="field">
                   <span>Google API Key</span>
                   <input value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Enter Google API Key here..." type="password" />
-                  <small>gemini.txt가 있으면 자동으로 로드됩니다.</small>
+                  <small>The API key is stored in Windows Credential Manager</small>
                 </label>
               )}
 

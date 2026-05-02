@@ -13,7 +13,20 @@ use std::{
 };
 use tauri::{AppHandle, Emitter, State};
 
+#[cfg(windows)]
+use windows_sys::Win32::{
+    Foundation::{GetLastError, ERROR_NOT_FOUND},
+    Security::Credentials::{
+        CredDeleteW, CredFree, CredReadW, CredWriteW, CREDENTIALW, CRED_MAX_CREDENTIAL_BLOB_SIZE,
+        CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC,
+    },
+};
+
 const DEFAULT_LM_API_KEY: &str = "lm-studio";
+const GOOGLE_CREDENTIAL_TARGET: &str = "AI Universal Translator: Google API Key";
+const LEGACY_GOOGLE_CREDENTIAL_TARGET: &str = "AI Universal Translator: Google API Bearer Token";
+const GOOGLE_CREDENTIAL_USER: &str = "API Key";
+const BEARER_PREFIX: &str = "Bearer ";
 
 #[derive(Default)]
 struct AppState {
@@ -67,12 +80,210 @@ enum Operation {
 }
 
 #[tauri::command]
-fn load_gemini_api_key() -> String {
+fn load_gemini_api_key() -> Result<String, String> {
+    match read_google_api_key_from_credential_manager() {
+        Ok(Some(api_key)) => Ok(api_key),
+        Ok(None) => {
+            let api_key = normalize_google_api_key(&load_gemini_api_key_from_file());
+            if !api_key.is_empty() {
+                let _ = save_google_api_key_to_credential_manager(&api_key);
+            }
+            Ok(api_key)
+        }
+        Err(error) => {
+            let api_key = normalize_google_api_key(&load_gemini_api_key_from_file());
+            if api_key.is_empty() {
+                Err(error)
+            } else {
+                Ok(api_key)
+            }
+        }
+    }
+}
+
+#[tauri::command]
+fn save_gemini_api_key(api_key: String) -> Result<(), String> {
+    save_google_api_key_to_credential_manager(&api_key)
+}
+
+fn load_gemini_api_key_from_file() -> String {
     candidate_paths("gemini.txt")
         .into_iter()
         .find_map(|path| fs::read_to_string(path).ok())
         .map(|value| value.trim().to_string())
         .unwrap_or_default()
+}
+
+fn normalize_google_api_key(value: &str) -> String {
+    let trimmed = value.trim();
+    match trimmed.get(..BEARER_PREFIX.len()) {
+        Some(prefix) if prefix.eq_ignore_ascii_case(BEARER_PREFIX) => trimmed
+            .get(BEARER_PREFIX.len()..)
+            .unwrap_or_default()
+            .trim()
+            .to_string(),
+        _ => trimmed.to_string(),
+    }
+}
+
+fn credential_error(action: &str, error_code: u32) -> String {
+    format!("Windows Credential Manager {action} failed with error code {error_code}.")
+}
+
+#[cfg(windows)]
+fn to_wide(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+#[cfg(windows)]
+fn read_google_api_key_from_credential_manager() -> Result<Option<String>, String> {
+    if let Some(api_key) = read_credential_api_key(GOOGLE_CREDENTIAL_TARGET)? {
+        return Ok(Some(api_key));
+    }
+
+    if let Some(api_key) = read_credential_api_key(LEGACY_GOOGLE_CREDENTIAL_TARGET)? {
+        let _ = save_google_api_key_to_credential_manager(&api_key);
+        let _ = delete_credential(LEGACY_GOOGLE_CREDENTIAL_TARGET);
+        return Ok(Some(api_key));
+    }
+
+    Ok(None)
+}
+
+#[cfg(windows)]
+fn read_credential_api_key(target: &str) -> Result<Option<String>, String> {
+    let raw_key = match read_credential_secret(target)? {
+        Some(value) => value,
+        None => return Ok(None),
+    };
+
+    let api_key = normalize_google_api_key(&raw_key);
+    if api_key.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(api_key))
+    }
+}
+
+#[cfg(windows)]
+fn read_credential_secret(target: &str) -> Result<Option<String>, String> {
+    let target_name = to_wide(target);
+    let mut credential_ptr: *mut CREDENTIALW = std::ptr::null_mut();
+
+    let ok = unsafe {
+        CredReadW(
+            target_name.as_ptr(),
+            CRED_TYPE_GENERIC,
+            0,
+            &mut credential_ptr,
+        )
+    };
+
+    if ok == 0 {
+        let error = unsafe { GetLastError() };
+        if error == ERROR_NOT_FOUND {
+            return Ok(None);
+        }
+        return Err(credential_error("read", error));
+    }
+
+    if credential_ptr.is_null() {
+        return Ok(None);
+    }
+
+    let credential = unsafe { &*credential_ptr };
+    let has_blob = credential.CredentialBlobSize > 0 && !credential.CredentialBlob.is_null();
+    let secret = if !has_blob {
+        String::new()
+    } else {
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                credential.CredentialBlob as *const u8,
+                credential.CredentialBlobSize as usize,
+            )
+        };
+        String::from_utf8_lossy(bytes)
+            .trim_end_matches('\0')
+            .to_string()
+    };
+
+    unsafe {
+        CredFree(credential_ptr.cast());
+    }
+
+    if secret.trim().is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(secret))
+    }
+}
+
+#[cfg(not(windows))]
+fn read_google_api_key_from_credential_manager() -> Result<Option<String>, String> {
+    Ok(None)
+}
+
+#[cfg(windows)]
+fn save_google_api_key_to_credential_manager(api_key: &str) -> Result<(), String> {
+    let api_key = normalize_google_api_key(api_key);
+    if api_key.is_empty() {
+        return delete_google_api_key_from_credential_manager();
+    }
+
+    let mut secret = api_key.into_bytes();
+    if secret.len() > CRED_MAX_CREDENTIAL_BLOB_SIZE as usize {
+        return Err("Google API key is too long for Windows Credential Manager.".to_string());
+    }
+
+    let mut target_name = to_wide(GOOGLE_CREDENTIAL_TARGET);
+    let mut user_name = to_wide(GOOGLE_CREDENTIAL_USER);
+    let mut comment = to_wide("Google API key for AI Universal Translator");
+    let mut credential = CREDENTIALW::default();
+    credential.Type = CRED_TYPE_GENERIC;
+    credential.TargetName = target_name.as_mut_ptr();
+    credential.Comment = comment.as_mut_ptr();
+    credential.CredentialBlobSize = secret.len() as u32;
+    credential.CredentialBlob = secret.as_mut_ptr();
+    credential.Persist = CRED_PERSIST_LOCAL_MACHINE;
+    credential.UserName = user_name.as_mut_ptr();
+
+    let ok = unsafe { CredWriteW(&credential, 0) };
+    if ok == 0 {
+        Err(credential_error("write", unsafe { GetLastError() }))
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(windows))]
+fn save_google_api_key_to_credential_manager(api_key: &str) -> Result<(), String> {
+    if normalize_google_api_key(api_key).is_empty() {
+        Ok(())
+    } else {
+        Err("Windows Credential Manager is only available on Windows.".to_string())
+    }
+}
+
+#[cfg(windows)]
+fn delete_google_api_key_from_credential_manager() -> Result<(), String> {
+    delete_credential(GOOGLE_CREDENTIAL_TARGET)?;
+    delete_credential(LEGACY_GOOGLE_CREDENTIAL_TARGET)
+}
+
+#[cfg(windows)]
+fn delete_credential(target: &str) -> Result<(), String> {
+    let target_name = to_wide(target);
+    let ok = unsafe { CredDeleteW(target_name.as_ptr(), CRED_TYPE_GENERIC, 0) };
+    if ok == 0 {
+        let error = unsafe { GetLastError() };
+        if error == ERROR_NOT_FOUND {
+            Ok(())
+        } else {
+            Err(credential_error("delete", error))
+        }
+    } else {
+        Ok(())
+    }
 }
 
 #[tauri::command]
@@ -663,7 +874,16 @@ async fn post_chat_completion(
     stream: bool,
 ) -> Result<reqwest::Response, String> {
     let api_key = if request.provider == "Google" {
-        request.api_key.clone().unwrap_or_default()
+        let request_api_key = request
+            .api_key
+            .as_deref()
+            .map(normalize_google_api_key)
+            .unwrap_or_default();
+        if request_api_key.is_empty() {
+            read_google_api_key_from_credential_manager().map(|key| key.unwrap_or_default())?
+        } else {
+            request_api_key
+        }
     } else {
         DEFAULT_LM_API_KEY.to_string()
     };
@@ -1000,6 +1220,7 @@ fn main() {
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
             load_gemini_api_key,
+            save_gemini_api_key,
             fetch_lm_studio_models,
             translate_text,
             summarize_text,

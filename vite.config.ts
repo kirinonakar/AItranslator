@@ -13,6 +13,11 @@ const chatEndpoint = (baseUrl: string) => {
   return trimmed.endsWith("/chat/completions") ? trimmed : `${trimmed}/chat/completions`;
 };
 
+const bearerAuthorization = (apiKey?: string) => {
+  const value = (apiKey ?? "lm-studio").trim() || "lm-studio";
+  return /^Bearer\s+/i.test(value) ? value : `Bearer ${value}`;
+};
+
 export default defineConfig({
   plugins: [
     react(),
@@ -80,7 +85,7 @@ export default defineConfig({
               method: "POST",
               headers: {
                 accept: "text/event-stream, application/json",
-                authorization: `Bearer ${proxyRequest.apiKey ?? "lm-studio"}`,
+                authorization: bearerAuthorization(proxyRequest.apiKey),
                 "content-type": "application/json",
               },
               body: JSON.stringify(proxyRequest.body ?? {}),

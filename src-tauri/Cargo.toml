@@ -17,6 +17,7 @@ tauri = { version = "2", features = ["image-ico"] }
 
 [target.'cfg(windows)'.dependencies]
 clipboard-win = { version = "5.4", features = ["std"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security_Credentials"] }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

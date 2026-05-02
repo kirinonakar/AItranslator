@@ -14,7 +14,8 @@ The app supports OpenAI-compatible chat completion APIs, including local LM Stud
 - Automatic chunking for long text and large files
 - LM Studio and Google provider modes
 - LM Studio model list auto-sync from `/models`
-- Google API key auto-load from `gemini.txt`
+- Secure Google API key storage via Windows Credential Manager
+- Automatic API key migration from `gemini.txt`
 - Source language auto-detection option
 - Adjustable temperature and chunk size
 - Stop/cancel controls for running tasks
@@ -97,7 +98,9 @@ npm run tauri:build
 
 ### Google Gemini
 
-You can enter the API key in the app, or place it in a `gemini.txt` file at the project root. When the app starts, it attempts to load that key automatically.
+You can enter the API key directly in the app. For security, the key is stored in the **Windows Credential Manager** and automatically loaded when the app starts. 
+
+For convenience, you can also place the key in a `gemini.txt` file at the project root; the app will automatically import it into the Credential Manager on the next launch.
 
 The Google provider mode switches the model list to the bundled Gemini/Gemma model options and locks the base URL to Google's OpenAI-compatible endpoint.
 

@@ -5,15 +5,13 @@ export const DEFAULT_LM_API_KEY = "lm-studio";
 
 export const GOOGLE_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/";
 export const GOOGLE_MODELS = [
-  "gemini-3.1-flash-lite-preview",
-  "gemini-3-flash-preview",
-  "gemini-3.1-pro-preview",
-  "gemini-2.5-flash",
-  "gemini-2.5-flash-lite",
+  "gemini-flash-lite-latest",
+  "gemini-flash-latest",
+  "gemini-pro-latest",
   "gemma-4-26b-a4b-it",
   "gemma-4-31b-it",
 ];
-export const DEFAULT_GOOGLE_MODEL = "gemini-3.1-flash-lite-preview";
+export const DEFAULT_GOOGLE_MODEL = "gemini-flash-lite-latest";
 
 export const LM_STUDIO_MODELS = [
   "google/gemma-4-e4b",

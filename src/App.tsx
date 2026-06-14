@@ -49,6 +49,18 @@ const readInitialTheme = (): Theme => {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 };
 
+const readInitialProvider = (): Provider => {
+  const saved = localStorage.getItem("provider");
+  if (saved === "LM Studio" || saved === "Google") return saved;
+  return "LM Studio";
+};
+
+const readInitialModel = (initialProvider: Provider): string => {
+  const saved = localStorage.getItem(`modelName_${initialProvider}`) || localStorage.getItem("modelName");
+  if (saved) return saved;
+  return initialProvider === "Google" ? DEFAULT_GOOGLE_MODEL : LM_STUDIO_MODELS[0];
+};
+
 const supportedFileExtensions = SUPPORTED_FILE_TYPES.split(",").map((extension) => extension.trim().toLowerCase());
 
 const isSupportedTextFile = (file: File) => {
@@ -374,12 +386,23 @@ const isAbortError = (error: unknown) =>
 
 function App() {
   const [theme, setTheme] = useState<Theme>(readInitialTheme);
-  const [provider, setProvider] = useState<Provider>("LM Studio");
+  
+  const initialProvider = useMemo(() => readInitialProvider(), []);
+  const [provider, setProvider] = useState<Provider>(initialProvider);
   const [apiKey, setApiKey] = useState("");
   const [hasLoadedApiKey, setHasLoadedApiKey] = useState(!isTauriRuntime());
-  const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL);
-  const [models, setModels] = useState(LM_STUDIO_MODELS);
-  const [modelName, setModelName] = useState(LM_STUDIO_MODELS[0]);
+  
+  const [baseUrl, setBaseUrl] = useState(() => 
+    initialProvider === "Google" ? GOOGLE_BASE_URL : DEFAULT_BASE_URL
+  );
+  const [models, setModels] = useState<string[]>(() => 
+    initialProvider === "Google" ? GOOGLE_MODELS : LM_STUDIO_MODELS
+  );
+  const [modelName, setModelName] = useState<string>(() => 
+    readInitialModel(initialProvider)
+  );
+
+  const isFirstRender = useRef(true);
   const [temperature, setTemperature] = useState(0.3);
   const [sourceLang, setSourceLang] = useState<Language>("Auto Detect");
   const [targetLang, setTargetLang] = useState<Language>("Korean");
@@ -438,6 +461,17 @@ function App() {
   }, [theme]);
 
   useEffect(() => {
+    localStorage.setItem("provider", provider);
+  }, [provider]);
+
+  useEffect(() => {
+    if (modelName) {
+      localStorage.setItem("modelName", modelName);
+      localStorage.setItem(`modelName_${provider}`, modelName);
+    }
+  }, [modelName, provider]);
+
+  useEffect(() => {
     if (!isTauriRuntime()) return;
 
     void defaultWindowIcon()
@@ -487,17 +521,24 @@ function App() {
   }, [apiKey, hasLoadedApiKey, provider]);
 
   useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+
     if (provider === "Google") {
       setBaseUrl(GOOGLE_BASE_URL);
       setModels(GOOGLE_MODELS);
-      setModelName(DEFAULT_GOOGLE_MODEL);
+      const savedModel = localStorage.getItem("modelName_Google") || DEFAULT_GOOGLE_MODEL;
+      setModelName(savedModel);
       setNotice("Google provider selected");
       return;
     }
 
     setBaseUrl(DEFAULT_BASE_URL);
     setModels(LM_STUDIO_MODELS);
-    setModelName(LM_STUDIO_MODELS[0]);
+    const savedModel = localStorage.getItem("modelName_LM Studio") || LM_STUDIO_MODELS[0];
+    setModelName(savedModel);
     setNotice("LM Studio provider selected");
   }, [provider]);
 
@@ -551,7 +592,7 @@ function App() {
       }
 
       setModels(fetchedModels);
-      setModelName(fetchedModels[0]);
+      setModelName((prev) => (fetchedModels.includes(prev) ? prev : fetchedModels[0]));
       setNotice(`Fetched ${fetchedModels.length} model(s).`);
     } catch (error) {
       setNotice(`${options?.automatic ? "Auto sync" : "Model sync"} failed: ${String(error)}`);

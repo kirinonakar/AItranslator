@@ -59,8 +59,24 @@ const readInitialProvider = (): Provider => {
 };
 
 const readInitialModel = (initialProvider: Provider): string => {
-  const saved = localStorage.getItem(`modelName_${initialProvider}`) || localStorage.getItem("modelName");
-  if (saved) return saved;
+  const saved = localStorage.getItem(`modelName_${initialProvider}`);
+  if (saved) {
+    if (initialProvider === "Google" && !GOOGLE_MODELS.includes(saved)) {
+      return DEFAULT_GOOGLE_MODEL;
+    }
+    return saved;
+  }
+
+  const legacySaved = localStorage.getItem("modelName");
+  if (legacySaved) {
+    if (initialProvider === "Google" && GOOGLE_MODELS.includes(legacySaved)) {
+      return legacySaved;
+    }
+    if (initialProvider === "LM Studio" && !GOOGLE_MODELS.includes(legacySaved)) {
+      return legacySaved;
+    }
+  }
+
   return initialProvider === "Google" ? DEFAULT_GOOGLE_MODEL : LM_STUDIO_MODELS[0];
 };
 
@@ -401,11 +417,25 @@ function App() {
   const [models, setModels] = useState<string[]>(() => 
     initialProvider === "Google" ? GOOGLE_MODELS : LM_STUDIO_MODELS
   );
-  const [modelName, setModelName] = useState<string>(() => 
-    readInitialModel(initialProvider)
-  );
+  const [googleModel, setGoogleModel] = useState<string>(() => {
+    const saved = localStorage.getItem("modelName_Google");
+    if (saved && GOOGLE_MODELS.includes(saved)) return saved;
+    const legacy = localStorage.getItem("modelName");
+    if (legacy && GOOGLE_MODELS.includes(legacy)) return legacy;
+    return DEFAULT_GOOGLE_MODEL;
+  });
 
-  const isFirstRender = useRef(true);
+  const [lmStudioModel, setLmStudioModel] = useState<string>(() => {
+    const saved = localStorage.getItem("modelName_LM Studio");
+    if (saved) return saved;
+    const legacy = localStorage.getItem("modelName");
+    if (legacy && !GOOGLE_MODELS.includes(legacy)) return legacy;
+    return LM_STUDIO_MODELS[0];
+  });
+
+  const modelName = provider === "Google" ? googleModel : lmStudioModel;
+
+
   const [temperature, setTemperature] = useState(0.3);
   const [sourceLang, setSourceLang] = useState<Language>("Auto Detect");
   const [targetLang, setTargetLang] = useState<Language>("Korean");
@@ -468,11 +498,18 @@ function App() {
   }, [provider]);
 
   useEffect(() => {
-    if (modelName) {
-      localStorage.setItem("modelName", modelName);
-      localStorage.setItem(`modelName_${provider}`, modelName);
+    localStorage.setItem("modelName_Google", googleModel);
+    if (provider === "Google") {
+      localStorage.setItem("modelName", googleModel);
     }
-  }, [modelName, provider]);
+  }, [googleModel, provider]);
+
+  useEffect(() => {
+    localStorage.setItem("modelName_LM Studio", lmStudioModel);
+    if (provider === "LM Studio") {
+      localStorage.setItem("modelName", lmStudioModel);
+    }
+  }, [lmStudioModel, provider]);
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
@@ -524,24 +561,15 @@ function App() {
   }, [apiKey, hasLoadedApiKey, provider]);
 
   useEffect(() => {
-    if (isFirstRender.current) {
-      isFirstRender.current = false;
-      return;
-    }
-
     if (provider === "Google") {
       setBaseUrl(GOOGLE_BASE_URL);
       setModels(GOOGLE_MODELS);
-      const savedModel = localStorage.getItem("modelName_Google") || DEFAULT_GOOGLE_MODEL;
-      setModelName(savedModel);
       setNotice("Google provider selected");
       return;
     }
 
     setBaseUrl(DEFAULT_BASE_URL);
     setModels(LM_STUDIO_MODELS);
-    const savedModel = localStorage.getItem("modelName_LM Studio") || LM_STUDIO_MODELS[0];
-    setModelName(savedModel);
     setNotice("LM Studio provider selected");
   }, [provider]);
 
@@ -595,7 +623,7 @@ function App() {
       }
 
       setModels(fetchedModels);
-      setModelName((prev) => (fetchedModels.includes(prev) ? prev : fetchedModels[0]));
+      setLmStudioModel((prev) => (fetchedModels.includes(prev) ? prev : fetchedModels[0]));
       setNotice(`Fetched ${fetchedModels.length} model(s).`);
     } catch (error) {
       setNotice(`${options?.automatic ? "Auto sync" : "Model sync"} failed: ${String(error)}`);
@@ -970,7 +998,14 @@ function App() {
               <label className="field">
                 <span>Model Name</span>
                 <div className="inline-field">
-                  <select value={modelName} onChange={(event) => setModelName(event.target.value)}>
+                  <select value={modelName} onChange={(event) => {
+                    const val = event.target.value;
+                    if (provider === "Google") {
+                      setGoogleModel(val);
+                    } else {
+                      setLmStudioModel(val);
+                    }
+                  }}>
                     {models.map((model) => (
                       <option value={model} key={model}>
                         {model}

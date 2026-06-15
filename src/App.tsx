@@ -51,7 +51,10 @@ const readInitialTheme = (): Theme => {
 
 const readInitialProvider = (): Provider => {
   const saved = localStorage.getItem("provider");
-  if (saved === "LM Studio" || saved === "Google") return saved;
+  if (!saved) return "LM Studio";
+  const normalized = saved.trim().toLowerCase();
+  if (normalized === "google") return "Google";
+  if (normalized === "lm studio" || normalized === "lmstudio") return "LM Studio";
   return "LM Studio";
 };
 

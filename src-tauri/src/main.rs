@@ -897,7 +897,7 @@ async fn post_chat_completion(
     prompt: &str,
     stream: bool,
 ) -> Result<reqwest::Response, String> {
-    let api_key = if request.provider == "Google" {
+    let api_key = if request.provider.eq_ignore_ascii_case("Google") {
         let request_api_key = request
             .api_key
             .as_deref()
@@ -1092,7 +1092,7 @@ fn format_stream_error(
         Operation::Summarize => "summarizing",
     };
 
-    let context = if request.provider == "LM Studio" {
+    let context = if request.provider.eq_ignore_ascii_case("LM Studio") || request.provider.eq_ignore_ascii_case("lmstudio") {
         format!(
             "Please ensure LM Studio is running and the server is started at {}.",
             request.base_url

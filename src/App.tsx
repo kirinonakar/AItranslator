@@ -26,9 +26,16 @@ import {
   DEFAULT_CEREBRAS_MODEL,
   DEFAULT_GOOGLE_MODEL,
   DEFAULT_LM_API_KEY,
+  DEFAULT_OLLAMA_API_KEY,
+  DEFAULT_OLLAMA_CLOUD_MODEL,
+  DEFAULT_OLLAMA_MODEL,
   GOOGLE_BASE_URL,
   GOOGLE_MODELS,
   LM_STUDIO_MODELS,
+  OLLAMA_BASE_URL,
+  OLLAMA_CLOUD_BASE_URL,
+  OLLAMA_CLOUD_MODELS,
+  OLLAMA_MODELS,
   PROVIDERS,
   SOURCE_LANGUAGES,
   SUPPORTED_FILE_TYPES,
@@ -52,12 +59,73 @@ const readInitialTheme = (): Theme => {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 };
 
+const getProviderBaseUrl = (provider: Provider) => {
+  if (provider === "Google") return GOOGLE_BASE_URL;
+  if (provider === "Cerebras") return CEREBRAS_BASE_URL;
+  if (provider === "Ollama") return OLLAMA_BASE_URL;
+  if (provider === "Ollama Cloud") return OLLAMA_CLOUD_BASE_URL;
+  return DEFAULT_BASE_URL;
+};
+
+const getProviderModels = (provider: Provider) => {
+  if (provider === "Google") return GOOGLE_MODELS;
+  if (provider === "Cerebras") return CEREBRAS_MODELS;
+  if (provider === "Ollama") return OLLAMA_MODELS;
+  if (provider === "Ollama Cloud") return OLLAMA_CLOUD_MODELS;
+  return LM_STUDIO_MODELS;
+};
+
+const getProviderDefaultModel = (provider: Provider) => {
+  if (provider === "Google") return DEFAULT_GOOGLE_MODEL;
+  if (provider === "Cerebras") return DEFAULT_CEREBRAS_MODEL;
+  if (provider === "Ollama") return DEFAULT_OLLAMA_MODEL;
+  if (provider === "Ollama Cloud") return DEFAULT_OLLAMA_CLOUD_MODEL;
+  return LM_STUDIO_MODELS[0];
+};
+
+const includeSelectedModel = (models: string[], selectedModel: string) => {
+  if (!selectedModel || models.includes(selectedModel)) return models;
+  return [selectedModel, ...models];
+};
+
+const providerRequiresApiKey = (provider: Provider) => provider === "Google" || provider === "Cerebras" || provider === "Ollama Cloud";
+const providerSupportsModelSync = (provider: Provider) => provider === "LM Studio" || provider === "Ollama" || provider === "Ollama Cloud";
+const providerUsesCuratedModelList = (provider: Provider) => provider === "Google" || provider === "Cerebras";
+
+const getStoredModel = (provider: Provider) => {
+  const saved = localStorage.getItem(`modelName_${provider}`);
+  const knownModels = getProviderModels(provider);
+  if (saved && (!providerUsesCuratedModelList(provider) || knownModels.includes(saved))) return saved;
+
+  const legacy = localStorage.getItem("modelName");
+  if (legacy && (!providerUsesCuratedModelList(provider) || knownModels.includes(legacy))) return legacy;
+
+  return getProviderDefaultModel(provider);
+};
+
+const getProviderDisplayModels = (provider: Provider) => includeSelectedModel(getProviderModels(provider), getStoredModel(provider));
+
+const getProviderApiKeyCommands = (provider: Provider) => {
+  if (provider === "Google") {
+    return { load: "load_gemini_api_key", save: "save_gemini_api_key", label: "Google" };
+  }
+  if (provider === "Cerebras") {
+    return { load: "load_cerebras_api_key", save: "save_cerebras_api_key", label: "Cerebras" };
+  }
+  if (provider === "Ollama Cloud") {
+    return { load: "load_ollama_cloud_api_key", save: "save_ollama_cloud_api_key", label: "Ollama Cloud" };
+  }
+  return null;
+};
+
 const readInitialProvider = (): Provider => {
   const saved = localStorage.getItem("provider");
   if (!saved) return "LM Studio";
   const normalized = saved.trim().toLowerCase();
   if (normalized === "google") return "Google";
   if (normalized === "cerebras") return "Cerebras";
+  if (normalized === "ollama") return "Ollama";
+  if (normalized === "ollama cloud" || normalized === "ollamacloud") return "Ollama Cloud";
   if (normalized === "lm studio" || normalized === "lmstudio") return "LM Studio";
   return "LM Studio";
 };
@@ -65,31 +133,18 @@ const readInitialProvider = (): Provider => {
 const readInitialModel = (initialProvider: Provider): string => {
   const saved = localStorage.getItem(`modelName_${initialProvider}`);
   if (saved) {
-    if (initialProvider === "Google" && !GOOGLE_MODELS.includes(saved)) {
-      return DEFAULT_GOOGLE_MODEL;
-    }
-    if (initialProvider === "Cerebras" && !CEREBRAS_MODELS.includes(saved)) {
-      return DEFAULT_CEREBRAS_MODEL;
-    }
-    return saved;
+    const models = getProviderModels(initialProvider);
+    if (!providerUsesCuratedModelList(initialProvider) || models.includes(saved)) return saved;
+    return getProviderDefaultModel(initialProvider);
   }
 
   const legacySaved = localStorage.getItem("modelName");
   if (legacySaved) {
-    if (initialProvider === "Google" && GOOGLE_MODELS.includes(legacySaved)) {
-      return legacySaved;
-    }
-    if (initialProvider === "Cerebras" && CEREBRAS_MODELS.includes(legacySaved)) {
-      return legacySaved;
-    }
-    if (initialProvider === "LM Studio" && !GOOGLE_MODELS.includes(legacySaved) && !CEREBRAS_MODELS.includes(legacySaved)) {
-      return legacySaved;
-    }
+    const models = getProviderModels(initialProvider);
+    if (!providerUsesCuratedModelList(initialProvider) || models.includes(legacySaved)) return legacySaved;
   }
 
-  if (initialProvider === "Google") return DEFAULT_GOOGLE_MODEL;
-  if (initialProvider === "Cerebras") return DEFAULT_CEREBRAS_MODEL;
-  return LM_STUDIO_MODELS[0];
+  return getProviderDefaultModel(initialProvider);
 };
 
 const supportedFileExtensions = SUPPORTED_FILE_TYPES.split(",").map((extension) => extension.trim().toLowerCase());
@@ -127,19 +182,37 @@ const writeClipboardText = (text: string) => {
   return navigator.clipboard.writeText(text);
 };
 
-const fetchLmStudioModels = async (baseUrl: string) => {
+const extractModelNames = (payload: unknown) => {
+  if (!payload || typeof payload !== "object") return [];
+  const record = payload as {
+    data?: Array<{ id?: string }>;
+    models?: Array<{ name?: string; model?: string }>;
+  };
+
+  const openAiModels = record.data?.map((model) => model.id).filter((id): id is string => Boolean(id)) ?? [];
+  if (openAiModels.length > 0) return openAiModels;
+
+  return record.models
+    ?.map((model) => model.name ?? model.model)
+    .filter((name): name is string => Boolean(name)) ?? [];
+};
+
+const fetchProviderModels = async (baseUrl: string, apiKey?: string) => {
+  const normalizedApiKey = normalizeApiKey(apiKey);
   if (isTauriRuntime()) {
-    return callTauri<string[]>("fetch_lm_studio_models", { baseUrl });
+    return callTauri<string[]>("fetch_provider_models", { baseUrl, apiKey: normalizedApiKey || null });
   }
 
-  const response = await fetch(`/__lmstudio_models?baseUrl=${encodeURIComponent(baseUrl)}`);
+  const params = new URLSearchParams({ baseUrl });
+  if (normalizedApiKey) params.set("apiKey", normalizedApiKey);
+
+  const response = await fetch(`/__provider_models?${params.toString()}`);
   if (!response.ok) {
     const body = await response.text().catch(() => "");
     throw new Error(`HTTP ${response.status}: ${body || response.statusText}`);
   }
 
-  const payload = (await response.json()) as { data?: Array<{ id?: string }> };
-  return payload.data?.map((model) => model.id).filter((id): id is string => Boolean(id)) ?? [];
+  return extractModelNames(await response.json());
 };
 
 const languageCodes: Record<string, string> = {
@@ -240,7 +313,11 @@ const splitTextIntoChunks = (text: string, maxChunkSize: number) => {
 };
 
 const postBrowserChatCompletion = async (request: AiRequest, prompt: string, stream: boolean, signal?: AbortSignal) => {
-  const apiKey = request.provider === "Google" || request.provider === "Cerebras" ? normalizeApiKey(request.apiKey) : DEFAULT_LM_API_KEY;
+  const apiKey = providerRequiresApiKey(request.provider)
+    ? normalizeApiKey(request.apiKey)
+    : request.provider === "Ollama"
+      ? DEFAULT_OLLAMA_API_KEY
+      : DEFAULT_LM_API_KEY;
   const response = await fetch("/__chat_completions", {
     method: "POST",
     headers: {
@@ -423,37 +500,24 @@ function App() {
   const [apiKey, setApiKey] = useState("");
   const [hasLoadedApiKey, setHasLoadedApiKey] = useState(!isTauriRuntime());
   
-  const [baseUrl, setBaseUrl] = useState(() => 
-    initialProvider === "Google" ? GOOGLE_BASE_URL : initialProvider === "Cerebras" ? CEREBRAS_BASE_URL : DEFAULT_BASE_URL
-  );
-  const [models, setModels] = useState<string[]>(() => 
-    initialProvider === "Google" ? GOOGLE_MODELS : initialProvider === "Cerebras" ? CEREBRAS_MODELS : LM_STUDIO_MODELS
-  );
-  const [googleModel, setGoogleModel] = useState<string>(() => {
-    const saved = localStorage.getItem("modelName_Google");
-    if (saved && GOOGLE_MODELS.includes(saved)) return saved;
-    const legacy = localStorage.getItem("modelName");
-    if (legacy && GOOGLE_MODELS.includes(legacy)) return legacy;
-    return DEFAULT_GOOGLE_MODEL;
-  });
+  const [baseUrl, setBaseUrl] = useState(() => getProviderBaseUrl(initialProvider));
+  const [models, setModels] = useState<string[]>(() => getProviderDisplayModels(initialProvider));
+  const [googleModel, setGoogleModel] = useState<string>(() => getStoredModel("Google"));
+  const [cerebrasModel, setCerebrasModel] = useState<string>(() => getStoredModel("Cerebras"));
+  const [lmStudioModel, setLmStudioModel] = useState<string>(() => getStoredModel("LM Studio"));
+  const [ollamaModel, setOllamaModel] = useState<string>(() => getStoredModel("Ollama"));
+  const [ollamaCloudModel, setOllamaCloudModel] = useState<string>(() => getStoredModel("Ollama Cloud"));
 
-  const [cerebrasModel, setCerebrasModel] = useState<string>(() => {
-    const saved = localStorage.getItem("modelName_Cerebras");
-    if (saved && CEREBRAS_MODELS.includes(saved)) return saved;
-    const legacy = localStorage.getItem("modelName");
-    if (legacy && CEREBRAS_MODELS.includes(legacy)) return legacy;
-    return DEFAULT_CEREBRAS_MODEL;
-  });
-
-  const [lmStudioModel, setLmStudioModel] = useState<string>(() => {
-    const saved = localStorage.getItem("modelName_LM Studio");
-    if (saved) return saved;
-    const legacy = localStorage.getItem("modelName");
-    if (legacy && !GOOGLE_MODELS.includes(legacy) && !CEREBRAS_MODELS.includes(legacy)) return legacy;
-    return LM_STUDIO_MODELS[0];
-  });
-
-  const modelName = provider === "Google" ? googleModel : provider === "Cerebras" ? cerebrasModel : lmStudioModel;
+  const modelName =
+    provider === "Google"
+      ? googleModel
+      : provider === "Cerebras"
+        ? cerebrasModel
+        : provider === "Ollama"
+          ? ollamaModel
+          : provider === "Ollama Cloud"
+            ? ollamaCloudModel
+            : lmStudioModel;
 
 
   const [temperature, setTemperature] = useState(0.3);
@@ -540,6 +604,20 @@ function App() {
   }, [lmStudioModel, provider]);
 
   useEffect(() => {
+    localStorage.setItem("modelName_Ollama", ollamaModel);
+    if (provider === "Ollama") {
+      localStorage.setItem("modelName", ollamaModel);
+    }
+  }, [ollamaModel, provider]);
+
+  useEffect(() => {
+    localStorage.setItem("modelName_Ollama Cloud", ollamaCloudModel);
+    if (provider === "Ollama Cloud") {
+      localStorage.setItem("modelName", ollamaCloudModel);
+    }
+  }, [ollamaCloudModel, provider]);
+
+  useEffect(() => {
     if (!isTauriRuntime()) return;
 
     void defaultWindowIcon()
@@ -553,7 +631,8 @@ function App() {
   useEffect(() => {
     if (!isTauriRuntime()) return;
 
-    if (provider !== "Google" && provider !== "Cerebras") {
+    const commands = getProviderApiKeyCommands(provider);
+    if (!commands) {
       savedApiKeyRef.current = "";
       currentKeyProviderRef.current = provider;
       setApiKey("");
@@ -561,8 +640,8 @@ function App() {
       return;
     }
 
-    const command = provider === "Cerebras" ? "load_cerebras_api_key" : "load_gemini_api_key";
-    callTauri<string>(command)
+    setHasLoadedApiKey(false);
+    callTauri<string>(commands.load)
       .then((key) => {
         const normalized = normalizeApiKey(key);
         savedApiKeyRef.current = normalized;
@@ -579,20 +658,18 @@ function App() {
 
   useEffect(() => {
     if (!isTauriRuntime() || !hasLoadedApiKey) return;
-    if (provider !== "Google" && provider !== "Cerebras") return;
+    const commands = getProviderApiKeyCommands(provider);
+    if (!commands) return;
     if (currentKeyProviderRef.current !== provider) return;
 
     const normalized = normalizeApiKey(apiKey);
     if (normalized === savedApiKeyRef.current) return;
 
-    const command = provider === "Cerebras" ? "save_cerebras_api_key" : "save_gemini_api_key";
-
     const timer = window.setTimeout(() => {
-      callTauri<void>(command, { apiKey: normalized })
+      callTauri<void>(commands.save, { apiKey: normalized })
         .then(() => {
           savedApiKeyRef.current = normalized;
-          const providerName = provider === "Cerebras" ? "Cerebras" : "Google";
-          setNotice(normalized ? `${providerName} API key saved to Windows Credential Manager.` : `${providerName} API key removed from Windows Credential Manager.`);
+          setNotice(normalized ? `${commands.label} API key saved to Windows Credential Manager.` : `${commands.label} API key removed from Windows Credential Manager.`);
         })
         .catch((error) => {
           setNotice(`API key save failed: ${String(error)}`);
@@ -603,23 +680,9 @@ function App() {
   }, [apiKey, hasLoadedApiKey, provider]);
 
   useEffect(() => {
-    if (provider === "Google") {
-      setBaseUrl(GOOGLE_BASE_URL);
-      setModels(GOOGLE_MODELS);
-      setNotice("Google provider selected");
-      return;
-    }
-
-    if (provider === "Cerebras") {
-      setBaseUrl(CEREBRAS_BASE_URL);
-      setModels(CEREBRAS_MODELS);
-      setNotice("Cerebras provider selected");
-      return;
-    }
-
-    setBaseUrl(DEFAULT_BASE_URL);
-    setModels(LM_STUDIO_MODELS);
-    setNotice("LM Studio provider selected");
+    setBaseUrl(getProviderBaseUrl(provider));
+    setModels(getProviderDisplayModels(provider));
+    setNotice(`${provider} provider selected`);
   }, [provider]);
 
   useEffect(() => {
@@ -660,36 +723,42 @@ function App() {
   }, []);
 
   const syncModels = useCallback(async (options?: { automatic?: boolean }) => {
-    if (provider !== "LM Studio") return;
+    if (!providerSupportsModelSync(provider)) return;
 
     setIsSyncingModels(true);
-    setNotice(options?.automatic ? "Auto-syncing LM Studio models..." : "Fetching models from LM Studio...");
+    setNotice(options?.automatic ? `Auto-syncing ${provider} models...` : `Fetching models from ${provider}...`);
     try {
-      const fetchedModels = await fetchLmStudioModels(baseUrl);
+      const fetchedModels = await fetchProviderModels(baseUrl, provider === "Ollama Cloud" ? apiKey : undefined);
       if (fetchedModels.length === 0) {
-        setNotice("Could not fetch models. Ensure LM Studio server is running.");
+        setNotice(`Could not fetch models from ${provider}.`);
         return;
       }
 
       setModels(fetchedModels);
-      setLmStudioModel((prev) => (fetchedModels.includes(prev) ? prev : fetchedModels[0]));
+      if (provider === "Ollama") {
+        setOllamaModel((prev) => (fetchedModels.includes(prev) ? prev : fetchedModels[0]));
+      } else if (provider === "Ollama Cloud") {
+        setOllamaCloudModel((prev) => (fetchedModels.includes(prev) ? prev : fetchedModels[0]));
+      } else {
+        setLmStudioModel((prev) => (fetchedModels.includes(prev) ? prev : fetchedModels[0]));
+      }
       setNotice(`Fetched ${fetchedModels.length} model(s).`);
     } catch (error) {
       setNotice(`${options?.automatic ? "Auto sync" : "Model sync"} failed: ${String(error)}`);
     } finally {
       setIsSyncingModels(false);
     }
-  }, [baseUrl, provider]);
+  }, [apiKey, baseUrl, provider]);
 
   useEffect(() => {
-    if (provider !== "LM Studio") return;
+    if (!providerSupportsModelSync(provider) || !hasLoadedApiKey) return;
 
     const timer = window.setTimeout(() => {
       void syncModels({ automatic: true });
     }, 350);
 
     return () => window.clearTimeout(timer);
-  }, [baseUrl, provider, syncModels]);
+  }, [baseUrl, hasLoadedApiKey, provider, syncModels]);
 
   const buildTextRequest = (text: string, chunkSize: number, source?: Language, originalFileName?: string): AiRequest => ({
     ...baseRequest,
@@ -987,7 +1056,7 @@ function App() {
     await loadTextFile(file);
   };
 
-  const isKeyRequired = provider === "Google" || provider === "Cerebras";
+  const isKeyRequired = providerRequiresApiKey(provider);
 
   return (
     <div className="app-shell">
@@ -1000,7 +1069,7 @@ function App() {
               </div>
               <div>
                 <h1>AI Universal Translator</h1>
-                <p>LM Studio, Google and Cerebras compatible desktop translator</p>
+                <p>LM Studio, Ollama, Google and Cerebras compatible desktop translator</p>
               </div>
             </div>
           </header>
@@ -1053,6 +1122,10 @@ function App() {
                       setGoogleModel(val);
                     } else if (provider === "Cerebras") {
                       setCerebrasModel(val);
+                    } else if (provider === "Ollama") {
+                      setOllamaModel(val);
+                    } else if (provider === "Ollama Cloud") {
+                      setOllamaCloudModel(val);
                     } else {
                       setLmStudioModel(val);
                     }
@@ -1063,7 +1136,7 @@ function App() {
                       </option>
                     ))}
                   </select>
-                  {provider === "LM Studio" && (
+                  {providerSupportsModelSync(provider) && (
                     <button className="icon-button compact" type="button" onClick={() => void syncModels()} disabled={isSyncingModels} aria-label="Sync models">
                       <RefreshCw size={17} className={isSyncingModels ? "spinning" : ""} />
                     </button>

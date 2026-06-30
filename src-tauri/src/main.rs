@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use futures_util::StreamExt;
+use regex::Regex;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -12,8 +13,6 @@ use std::{
     time::Duration,
 };
 use tauri::{AppHandle, Emitter, State};
-use regex::Regex;
-
 
 #[cfg(windows)]
 use windows_sys::Win32::{
@@ -25,11 +24,14 @@ use windows_sys::Win32::{
 };
 
 const DEFAULT_LM_API_KEY: &str = "lm-studio";
+const DEFAULT_OLLAMA_API_KEY: &str = "ollama";
 const GOOGLE_CREDENTIAL_TARGET: &str = "AI Universal Translator: Google API Key";
 const LEGACY_GOOGLE_CREDENTIAL_TARGET: &str = "AI Universal Translator: Google API Bearer Token";
 const GOOGLE_CREDENTIAL_USER: &str = "API Key";
 const CEREBRAS_CREDENTIAL_TARGET: &str = "AI Universal Translator: Cerebras API Key";
 const CEREBRAS_CREDENTIAL_USER: &str = "API Key";
+const OLLAMA_CLOUD_CREDENTIAL_TARGET: &str = "AI Universal Translator: Ollama Cloud API Key";
+const OLLAMA_CLOUD_CREDENTIAL_USER: &str = "API Key";
 const BEARER_PREFIX: &str = "Bearer ";
 
 #[derive(Default)]
@@ -162,6 +164,67 @@ fn save_cerebras_api_key(api_key: String) -> Result<(), String> {
 #[cfg(not(windows))]
 #[tauri::command]
 fn save_cerebras_api_key(api_key: String) -> Result<(), String> {
+    if normalize_google_api_key(&api_key).is_empty() {
+        Ok(())
+    } else {
+        Err("Windows Credential Manager is only available on Windows.".to_string())
+    }
+}
+
+#[cfg(windows)]
+#[tauri::command]
+fn load_ollama_cloud_api_key() -> Result<String, String> {
+    match read_credential_api_key(OLLAMA_CLOUD_CREDENTIAL_TARGET) {
+        Ok(Some(api_key)) => Ok(api_key),
+        Ok(None) => Ok(String::new()),
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+fn load_ollama_cloud_api_key() -> Result<String, String> {
+    Ok(String::new())
+}
+
+#[cfg(windows)]
+#[tauri::command]
+fn save_ollama_cloud_api_key(api_key: String) -> Result<(), String> {
+    let api_key = normalize_google_api_key(&api_key);
+    if api_key.is_empty() {
+        delete_credential(OLLAMA_CLOUD_CREDENTIAL_TARGET)
+    } else {
+        let mut secret = api_key.into_bytes();
+        if secret.len() > CRED_MAX_CREDENTIAL_BLOB_SIZE as usize {
+            return Err(
+                "Ollama Cloud API key is too long for Windows Credential Manager.".to_string(),
+            );
+        }
+
+        let mut target_name = to_wide(OLLAMA_CLOUD_CREDENTIAL_TARGET);
+        let mut user_name = to_wide(OLLAMA_CLOUD_CREDENTIAL_USER);
+        let mut comment = to_wide("Ollama Cloud API key for AI Universal Translator");
+        let mut credential = CREDENTIALW::default();
+        credential.Type = CRED_TYPE_GENERIC;
+        credential.TargetName = target_name.as_mut_ptr();
+        credential.Comment = comment.as_mut_ptr();
+        credential.CredentialBlobSize = secret.len() as u32;
+        credential.CredentialBlob = secret.as_mut_ptr();
+        credential.Persist = CRED_PERSIST_LOCAL_MACHINE;
+        credential.UserName = user_name.as_mut_ptr();
+
+        let ok = unsafe { CredWriteW(&credential, 0) };
+        if ok == 0 {
+            Err(credential_error("write", unsafe { GetLastError() }))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+fn save_ollama_cloud_api_key(api_key: String) -> Result<(), String> {
     if normalize_google_api_key(&api_key).is_empty() {
         Ok(())
     } else {
@@ -355,17 +418,25 @@ fn delete_credential(target: &str) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn fetch_lm_studio_models(base_url: String) -> Result<Vec<String>, String> {
+async fn fetch_provider_models(
+    base_url: String,
+    api_key: Option<String>,
+) -> Result<Vec<String>, String> {
     let client = Client::builder()
         .timeout(Duration::from_secs(5))
         .build()
         .map_err(|error| error.to_string())?;
 
-    let response = client
-        .get(models_endpoint(&base_url))
-        .send()
-        .await
-        .map_err(|error| error.to_string())?;
+    let mut request = client.get(models_endpoint(&base_url));
+    let api_key = api_key
+        .as_deref()
+        .map(normalize_google_api_key)
+        .unwrap_or_default();
+    if !api_key.is_empty() {
+        request = request.bearer_auth(api_key);
+    }
+
+    let response = request.send().await.map_err(|error| error.to_string())?;
 
     if !response.status().is_success() {
         let status = response.status();
@@ -374,22 +445,7 @@ async fn fetch_lm_studio_models(base_url: String) -> Result<Vec<String>, String>
     }
 
     let payload: Value = response.json().await.map_err(|error| error.to_string())?;
-    let models = payload
-        .get("data")
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| {
-                    item.get("id")
-                        .and_then(Value::as_str)
-                        .map(ToOwned::to_owned)
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-
-    Ok(models)
+    Ok(parse_model_names(&payload))
 }
 
 #[tauri::command]
@@ -906,13 +962,13 @@ async fn read_streaming_response(
         }
     }
 
-        Ok(StreamRead::Completed(filter_thoughts(&chunk_output)))
+    Ok(StreamRead::Completed(filter_thoughts(&chunk_output)))
 }
 
 fn filter_thoughts(text: &str) -> String {
-    // Rust's regex crate does not support backreferences (\1). 
+    // Rust's regex crate does not support backreferences (\1).
     // We must match each tag pair explicitly.
-    
+
     // 1. Remove closed blocks: <thought>...</thought> or <think>...</think>
     let closed_re = Regex::new(r"(?s)<thought>.*?</thought>|<think>.*?</think>").unwrap();
     let intermediate = closed_re.replace_all(text, "");
@@ -923,8 +979,6 @@ fn filter_thoughts(text: &str) -> String {
 
     final_output.trim().to_string()
 }
-
-
 
 fn parse_sse_delta(line: &str) -> Result<Option<String>, String> {
     let line = line.trim();
@@ -981,6 +1035,22 @@ async fn post_chat_completion(
         } else {
             request_api_key
         }
+    } else if request.provider.eq_ignore_ascii_case("Ollama Cloud")
+        || request.provider.eq_ignore_ascii_case("OllamaCloud")
+    {
+        let request_api_key = request
+            .api_key
+            .as_deref()
+            .map(normalize_google_api_key)
+            .unwrap_or_default();
+        if request_api_key.is_empty() {
+            read_credential_api_key(OLLAMA_CLOUD_CREDENTIAL_TARGET)
+                .map(|key| key.unwrap_or_default())?
+        } else {
+            request_api_key
+        }
+    } else if request.provider.eq_ignore_ascii_case("Ollama") {
+        DEFAULT_OLLAMA_API_KEY.to_string()
     } else {
         DEFAULT_LM_API_KEY.to_string()
     };
@@ -1145,6 +1215,43 @@ fn models_endpoint(base_url: &str) -> String {
     }
 }
 
+fn parse_model_names(payload: &Value) -> Vec<String> {
+    let openai_models = payload
+        .get("data")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    item.get("id")
+                        .and_then(Value::as_str)
+                        .map(ToOwned::to_owned)
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    if !openai_models.is_empty() {
+        return openai_models;
+    }
+
+    payload
+        .get("models")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    item.get("name")
+                        .or_else(|| item.get("model"))
+                        .and_then(Value::as_str)
+                        .map(ToOwned::to_owned)
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
 fn chat_endpoint(base_url: &str) -> String {
     let trimmed = base_url.trim_end_matches('/');
     if trimmed.ends_with("/chat/completions") {
@@ -1165,11 +1272,22 @@ fn format_stream_error(
         Operation::Summarize => "summarizing",
     };
 
-    let context = if request.provider.eq_ignore_ascii_case("LM Studio") || request.provider.eq_ignore_ascii_case("lmstudio") {
+    let context = if request.provider.eq_ignore_ascii_case("LM Studio")
+        || request.provider.eq_ignore_ascii_case("lmstudio")
+    {
         format!(
             "Please ensure LM Studio is running and the server is started at {}.",
             request.base_url
         )
+    } else if request.provider.eq_ignore_ascii_case("Ollama") {
+        format!(
+            "Please ensure Ollama is running and the OpenAI-compatible server is available at {}.",
+            request.base_url
+        )
+    } else if request.provider.eq_ignore_ascii_case("Ollama Cloud")
+        || request.provider.eq_ignore_ascii_case("OllamaCloud")
+    {
+        "Please ensure Ollama Cloud endpoint is correct and your API Key is valid.".to_string()
     } else if request.provider.eq_ignore_ascii_case("Cerebras") {
         "Please ensure Cerebras endpoint is correct and your API Key is valid.".to_string()
     } else {
@@ -1319,7 +1437,9 @@ fn main() {
             save_gemini_api_key,
             load_cerebras_api_key,
             save_cerebras_api_key,
-            fetch_lm_studio_models,
+            load_ollama_cloud_api_key,
+            save_ollama_cloud_api_key,
+            fetch_provider_models,
             translate_text,
             summarize_text,
             translate_file,

@@ -2,7 +2,7 @@
 
 AI Universal Translator is a desktop translation and summarization app built with Tauri, Rust, TypeScript, and React.
 
-The app supports OpenAI-compatible chat completion APIs, including local LM Studio servers, Google's Gemini OpenAI-compatible endpoint, and Cerebras's API endpoint.
+The app supports OpenAI-compatible chat completion APIs via local providers (LM Studio, Ollama) and cloud providers (Google Gemini, Cerebras, Ollama Cloud).
 
 ![UI Preview](screenshot.png)
 
@@ -12,10 +12,10 @@ The app supports OpenAI-compatible chat completion APIs, including local LM Stud
 - Text summarization with streaming output
 - UTF-8 text file translation
 - Automatic chunking for long text and large files
-- LM Studio, Google, and Cerebras provider modes
-- LM Studio model list auto-sync from `/models`
-- Secure Google and Cerebras API key storage via Windows Credential Manager
-- Automatic API key migration from `gemini.txt`
+- Multiple provider support: Local (LM Studio, Ollama) & Cloud (Google Gemini, Cerebras, Ollama Cloud)
+- Local model list auto-sync (LM Studio, Ollama, Ollama Cloud)
+- Secure API key storage via Windows Credential Manager for cloud providers
+- Automatic API key migration from `gemini.txt` for Google Gemini
 - Source language auto-detection option
 - Adjustable temperature and chunk size
 - Stop/cancel controls for running tasks
@@ -38,25 +38,7 @@ The app supports OpenAI-compatible chat completion APIs, including local LM Stud
 - Node.js 20 or newer
 - npm
 - Rust toolchain
-- LM Studio running with a local server, a Google Gemini API key, or a Cerebras API key
-
-For LM Studio, the default API base URL is:
-
-```text
-http://localhost:1234/v1
-```
-
-For Google, the app uses:
-
-```text
-https://generativelanguage.googleapis.com/v1beta/openai/
-```
-
-For Cerebras, the app uses:
-
-```text
-https://api.cerebras.ai/v1
-```
+- A running local LLM provider or cloud provider API key
 
 ### 📥 Download
 You can download the latest version from the [Releases Page](https://github.com/kirinonakar/AItranslator/releases).
@@ -95,26 +77,17 @@ npm run tauri:build
 
 ## Provider Setup
 
-### LM Studio
+### 💻 Local Providers (No API Key)
 
-1. Open LM Studio.
-2. Start the local server.
-3. Confirm the server is available at `http://localhost:1234/v1`.
-4. Click the model sync button in the app to fetch available models.
+* **LM Studio**: Run local server at `http://localhost:1234/v1`. Click model sync to fetch loaded models.
+* **Ollama**: Run local server at `http://localhost:11434/v1`. Click model sync to fetch downloaded models.
 
-### Google Gemini
+### ☁️ Cloud Providers (API Key required)
+*API keys are securely stored in Windows Credential Manager.*
 
-You can enter the API key directly in the app. For security, the key is stored in the **Windows Credential Manager** and automatically loaded when the app starts. 
-
-For convenience, you can also place the key in a `gemini.txt` file at the project root; the app will automatically import it into the Credential Manager on the next launch.
-
-The Google provider mode switches the model list to the bundled Gemini/Gemma model options and locks the base URL to Google's OpenAI-compatible endpoint.
-
-### Cerebras
-
-You can enter the Cerebras API key directly in the app. Like the Google key, it is securely stored in the **Windows Credential Manager** and automatically loaded when the app starts.
-
-The Cerebras provider mode switches the model list to the bundled Cerebras model options and locks the base URL to the Cerebras API endpoint.
+* **Google Gemini**: Uses `https://generativelanguage.googleapis.com/v1beta/openai/`. Supports direct key input or auto-import from `gemini.txt` at the root.
+* **Cerebras**: Uses `https://api.cerebras.ai/v1`.
+* **Ollama Cloud**: Uses `https://ollama.com/v1`. Supports model sync.
 
 ## Supported Languages
 

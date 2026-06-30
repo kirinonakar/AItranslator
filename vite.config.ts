@@ -18,27 +18,36 @@ const bearerAuthorization = (apiKey?: string) => {
   return /^Bearer\s+/i.test(value) ? value : `Bearer ${value}`;
 };
 
+const optionalBearerAuthorization = (apiKey?: string) => {
+  const value = apiKey?.trim();
+  if (!value) return undefined;
+  return /^Bearer\s+/i.test(value) ? value : `Bearer ${value}`;
+};
+
 export default defineConfig({
   plugins: [
     react(),
     {
-      name: "lm-studio-models-proxy",
+      name: "ai-provider-proxies",
       configureServer(server) {
-        server.middlewares.use("/__lmstudio_models", async (req, res) => {
+        const handleModelsRequest = async (req: import("http").IncomingMessage, res: import("http").ServerResponse) => {
           try {
             const requestUrl = new URL(req.url ?? "", "http://localhost");
             const baseUrl = requestUrl.searchParams.get("baseUrl") ?? DEFAULT_BASE_URL;
+            const apiKey = requestUrl.searchParams.get("apiKey") ?? undefined;
 
             if (!/^https?:\/\//i.test(baseUrl)) {
               res.statusCode = 400;
               res.setHeader("content-type", "application/json");
-              res.end(JSON.stringify({ error: "Only http and https LM Studio URLs are supported." }));
+              res.end(JSON.stringify({ error: "Only http and https provider URLs are supported." }));
               return;
             }
 
+            const authorization = optionalBearerAuthorization(apiKey);
             const upstream = await fetch(modelsEndpoint(baseUrl), {
               headers: {
                 accept: "application/json",
+                ...(authorization ? { authorization } : {}),
               },
             });
             const body = await upstream.text();
@@ -51,7 +60,10 @@ export default defineConfig({
             res.setHeader("content-type", "application/json");
             res.end(JSON.stringify({ error: String(error) }));
           }
-        });
+        };
+
+        server.middlewares.use("/__provider_models", handleModelsRequest);
+        server.middlewares.use("/__lmstudio_models", handleModelsRequest);
 
         server.middlewares.use("/__chat_completions", async (req, res) => {
           if (req.method !== "POST") {

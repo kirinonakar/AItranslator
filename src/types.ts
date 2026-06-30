@@ -1,4 +1,4 @@
-export type Provider = "LM Studio" | "Google" | "Cerebras";
+export type Provider = "LM Studio" | "Ollama" | "Ollama Cloud" | "Google" | "Cerebras";
 export type Language =
   | "Auto Detect"
   | "English"

@@ -1,4 +1,4 @@
-export type Provider = "LM Studio" | "Google";
+export type Provider = "LM Studio" | "Google" | "Cerebras";
 export type Language =
   | "Auto Detect"
   | "English"

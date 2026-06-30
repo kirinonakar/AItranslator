@@ -19,7 +19,15 @@ export const LM_STUDIO_MODELS = [
   "translategemma-12b-it",
 ];
 
-export const PROVIDERS: Provider[] = ["LM Studio", "Google"];
+export const CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1";
+export const CEREBRAS_MODELS = [
+  "gemma-4-31b",
+  "gpt-oss-120b",
+  "zai-glm-4.7",
+];
+export const DEFAULT_CEREBRAS_MODEL = "gemma-4-31b";
+
+export const PROVIDERS: Provider[] = ["LM Studio", "Google", "Cerebras"];
 
 export const SOURCE_LANGUAGES: Language[] = [
   "Auto Detect",

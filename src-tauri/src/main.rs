@@ -28,6 +28,8 @@ const DEFAULT_LM_API_KEY: &str = "lm-studio";
 const GOOGLE_CREDENTIAL_TARGET: &str = "AI Universal Translator: Google API Key";
 const LEGACY_GOOGLE_CREDENTIAL_TARGET: &str = "AI Universal Translator: Google API Bearer Token";
 const GOOGLE_CREDENTIAL_USER: &str = "API Key";
+const CEREBRAS_CREDENTIAL_TARGET: &str = "AI Universal Translator: Cerebras API Key";
+const CEREBRAS_CREDENTIAL_USER: &str = "API Key";
 const BEARER_PREFIX: &str = "Bearer ";
 
 #[derive(Default)]
@@ -106,6 +108,65 @@ fn load_gemini_api_key() -> Result<String, String> {
 #[tauri::command]
 fn save_gemini_api_key(api_key: String) -> Result<(), String> {
     save_google_api_key_to_credential_manager(&api_key)
+}
+
+#[cfg(windows)]
+#[tauri::command]
+fn load_cerebras_api_key() -> Result<String, String> {
+    match read_credential_api_key(CEREBRAS_CREDENTIAL_TARGET) {
+        Ok(Some(api_key)) => Ok(api_key),
+        Ok(None) => Ok(String::new()),
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+fn load_cerebras_api_key() -> Result<String, String> {
+    Ok(String::new())
+}
+
+#[cfg(windows)]
+#[tauri::command]
+fn save_cerebras_api_key(api_key: String) -> Result<(), String> {
+    let api_key = normalize_google_api_key(&api_key);
+    if api_key.is_empty() {
+        delete_credential(CEREBRAS_CREDENTIAL_TARGET)
+    } else {
+        let mut secret = api_key.into_bytes();
+        if secret.len() > CRED_MAX_CREDENTIAL_BLOB_SIZE as usize {
+            return Err("Cerebras API key is too long for Windows Credential Manager.".to_string());
+        }
+
+        let mut target_name = to_wide(CEREBRAS_CREDENTIAL_TARGET);
+        let mut user_name = to_wide(CEREBRAS_CREDENTIAL_USER);
+        let mut comment = to_wide("Cerebras API key for AI Universal Translator");
+        let mut credential = CREDENTIALW::default();
+        credential.Type = CRED_TYPE_GENERIC;
+        credential.TargetName = target_name.as_mut_ptr();
+        credential.Comment = comment.as_mut_ptr();
+        credential.CredentialBlobSize = secret.len() as u32;
+        credential.CredentialBlob = secret.as_mut_ptr();
+        credential.Persist = CRED_PERSIST_LOCAL_MACHINE;
+        credential.UserName = user_name.as_mut_ptr();
+
+        let ok = unsafe { CredWriteW(&credential, 0) };
+        if ok == 0 {
+            Err(credential_error("write", unsafe { GetLastError() }))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+fn save_cerebras_api_key(api_key: String) -> Result<(), String> {
+    if normalize_google_api_key(&api_key).is_empty() {
+        Ok(())
+    } else {
+        Err("Windows Credential Manager is only available on Windows.".to_string())
+    }
 }
 
 fn load_gemini_api_key_from_file() -> String {
@@ -908,6 +969,18 @@ async fn post_chat_completion(
         } else {
             request_api_key
         }
+    } else if request.provider.eq_ignore_ascii_case("Cerebras") {
+        let request_api_key = request
+            .api_key
+            .as_deref()
+            .map(normalize_google_api_key)
+            .unwrap_or_default();
+        if request_api_key.is_empty() {
+            read_credential_api_key(CEREBRAS_CREDENTIAL_TARGET)
+                .map(|key| key.unwrap_or_default())?
+        } else {
+            request_api_key
+        }
     } else {
         DEFAULT_LM_API_KEY.to_string()
     };
@@ -1097,6 +1170,8 @@ fn format_stream_error(
             "Please ensure LM Studio is running and the server is started at {}.",
             request.base_url
         )
+    } else if request.provider.eq_ignore_ascii_case("Cerebras") {
+        "Please ensure Cerebras endpoint is correct and your API Key is valid.".to_string()
     } else {
         "Please ensure Google endpoint is correct and your API Key is valid.".to_string()
     };
@@ -1242,6 +1317,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             load_gemini_api_key,
             save_gemini_api_key,
+            load_cerebras_api_key,
+            save_cerebras_api_key,
             fetch_lm_studio_models,
             translate_text,
             summarize_text,

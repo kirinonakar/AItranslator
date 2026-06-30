@@ -20,7 +20,10 @@ import {
 } from "lucide-react";
 import { ChangeEvent, DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  CEREBRAS_BASE_URL,
+  CEREBRAS_MODELS,
   DEFAULT_BASE_URL,
+  DEFAULT_CEREBRAS_MODEL,
   DEFAULT_GOOGLE_MODEL,
   DEFAULT_LM_API_KEY,
   GOOGLE_BASE_URL,
@@ -54,6 +57,7 @@ const readInitialProvider = (): Provider => {
   if (!saved) return "LM Studio";
   const normalized = saved.trim().toLowerCase();
   if (normalized === "google") return "Google";
+  if (normalized === "cerebras") return "Cerebras";
   if (normalized === "lm studio" || normalized === "lmstudio") return "LM Studio";
   return "LM Studio";
 };
@@ -64,6 +68,9 @@ const readInitialModel = (initialProvider: Provider): string => {
     if (initialProvider === "Google" && !GOOGLE_MODELS.includes(saved)) {
       return DEFAULT_GOOGLE_MODEL;
     }
+    if (initialProvider === "Cerebras" && !CEREBRAS_MODELS.includes(saved)) {
+      return DEFAULT_CEREBRAS_MODEL;
+    }
     return saved;
   }
 
@@ -72,12 +79,17 @@ const readInitialModel = (initialProvider: Provider): string => {
     if (initialProvider === "Google" && GOOGLE_MODELS.includes(legacySaved)) {
       return legacySaved;
     }
-    if (initialProvider === "LM Studio" && !GOOGLE_MODELS.includes(legacySaved)) {
+    if (initialProvider === "Cerebras" && CEREBRAS_MODELS.includes(legacySaved)) {
+      return legacySaved;
+    }
+    if (initialProvider === "LM Studio" && !GOOGLE_MODELS.includes(legacySaved) && !CEREBRAS_MODELS.includes(legacySaved)) {
       return legacySaved;
     }
   }
 
-  return initialProvider === "Google" ? DEFAULT_GOOGLE_MODEL : LM_STUDIO_MODELS[0];
+  if (initialProvider === "Google") return DEFAULT_GOOGLE_MODEL;
+  if (initialProvider === "Cerebras") return DEFAULT_CEREBRAS_MODEL;
+  return LM_STUDIO_MODELS[0];
 };
 
 const supportedFileExtensions = SUPPORTED_FILE_TYPES.split(",").map((extension) => extension.trim().toLowerCase());
@@ -228,7 +240,7 @@ const splitTextIntoChunks = (text: string, maxChunkSize: number) => {
 };
 
 const postBrowserChatCompletion = async (request: AiRequest, prompt: string, stream: boolean, signal?: AbortSignal) => {
-  const apiKey = request.provider === "Google" ? normalizeApiKey(request.apiKey) : DEFAULT_LM_API_KEY;
+  const apiKey = request.provider === "Google" || request.provider === "Cerebras" ? normalizeApiKey(request.apiKey) : DEFAULT_LM_API_KEY;
   const response = await fetch("/__chat_completions", {
     method: "POST",
     headers: {
@@ -412,10 +424,10 @@ function App() {
   const [hasLoadedApiKey, setHasLoadedApiKey] = useState(!isTauriRuntime());
   
   const [baseUrl, setBaseUrl] = useState(() => 
-    initialProvider === "Google" ? GOOGLE_BASE_URL : DEFAULT_BASE_URL
+    initialProvider === "Google" ? GOOGLE_BASE_URL : initialProvider === "Cerebras" ? CEREBRAS_BASE_URL : DEFAULT_BASE_URL
   );
   const [models, setModels] = useState<string[]>(() => 
-    initialProvider === "Google" ? GOOGLE_MODELS : LM_STUDIO_MODELS
+    initialProvider === "Google" ? GOOGLE_MODELS : initialProvider === "Cerebras" ? CEREBRAS_MODELS : LM_STUDIO_MODELS
   );
   const [googleModel, setGoogleModel] = useState<string>(() => {
     const saved = localStorage.getItem("modelName_Google");
@@ -425,15 +437,23 @@ function App() {
     return DEFAULT_GOOGLE_MODEL;
   });
 
+  const [cerebrasModel, setCerebrasModel] = useState<string>(() => {
+    const saved = localStorage.getItem("modelName_Cerebras");
+    if (saved && CEREBRAS_MODELS.includes(saved)) return saved;
+    const legacy = localStorage.getItem("modelName");
+    if (legacy && CEREBRAS_MODELS.includes(legacy)) return legacy;
+    return DEFAULT_CEREBRAS_MODEL;
+  });
+
   const [lmStudioModel, setLmStudioModel] = useState<string>(() => {
     const saved = localStorage.getItem("modelName_LM Studio");
     if (saved) return saved;
     const legacy = localStorage.getItem("modelName");
-    if (legacy && !GOOGLE_MODELS.includes(legacy)) return legacy;
+    if (legacy && !GOOGLE_MODELS.includes(legacy) && !CEREBRAS_MODELS.includes(legacy)) return legacy;
     return LM_STUDIO_MODELS[0];
   });
 
-  const modelName = provider === "Google" ? googleModel : lmStudioModel;
+  const modelName = provider === "Google" ? googleModel : provider === "Cerebras" ? cerebrasModel : lmStudioModel;
 
 
   const [temperature, setTemperature] = useState(0.3);
@@ -472,6 +492,7 @@ function App() {
   const browserTaskControllers = useRef<Partial<Record<TabId, AbortController>>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
   const savedApiKeyRef = useRef("");
+  const currentKeyProviderRef = useRef<Provider | null>(null);
 
   const baseRequest = useMemo(
     () => ({
@@ -505,6 +526,13 @@ function App() {
   }, [googleModel, provider]);
 
   useEffect(() => {
+    localStorage.setItem("modelName_Cerebras", cerebrasModel);
+    if (provider === "Cerebras") {
+      localStorage.setItem("modelName", cerebrasModel);
+    }
+  }, [cerebrasModel, provider]);
+
+  useEffect(() => {
     localStorage.setItem("modelName_LM Studio", lmStudioModel);
     if (provider === "LM Studio") {
       localStorage.setItem("modelName", lmStudioModel);
@@ -525,35 +553,49 @@ function App() {
   useEffect(() => {
     if (!isTauriRuntime()) return;
 
-    callTauri<string>("load_gemini_api_key")
+    if (provider !== "Google" && provider !== "Cerebras") {
+      savedApiKeyRef.current = "";
+      currentKeyProviderRef.current = provider;
+      setApiKey("");
+      setHasLoadedApiKey(true);
+      return;
+    }
+
+    const command = provider === "Cerebras" ? "load_cerebras_api_key" : "load_gemini_api_key";
+    callTauri<string>(command)
       .then((key) => {
         const normalized = normalizeApiKey(key);
         savedApiKeyRef.current = normalized;
+        currentKeyProviderRef.current = provider;
         setApiKey(normalized);
       })
       .catch(() => {
         savedApiKeyRef.current = "";
+        currentKeyProviderRef.current = provider;
         setApiKey("");
       })
       .finally(() => setHasLoadedApiKey(true));
-  }, []);
+  }, [provider]);
 
   useEffect(() => {
     if (!isTauriRuntime() || !hasLoadedApiKey) return;
+    if (provider !== "Google" && provider !== "Cerebras") return;
+    if (currentKeyProviderRef.current !== provider) return;
 
     const normalized = normalizeApiKey(apiKey);
     if (normalized === savedApiKeyRef.current) return;
 
+    const command = provider === "Cerebras" ? "save_cerebras_api_key" : "save_gemini_api_key";
+
     const timer = window.setTimeout(() => {
-      callTauri<void>("save_gemini_api_key", { apiKey: normalized })
+      callTauri<void>(command, { apiKey: normalized })
         .then(() => {
           savedApiKeyRef.current = normalized;
-          if (provider === "Google") {
-            setNotice(normalized ? "Google API key saved to Windows Credential Manager." : "Google API key removed from Windows Credential Manager.");
-          }
+          const providerName = provider === "Cerebras" ? "Cerebras" : "Google";
+          setNotice(normalized ? `${providerName} API key saved to Windows Credential Manager.` : `${providerName} API key removed from Windows Credential Manager.`);
         })
         .catch((error) => {
-          if (provider === "Google") setNotice(`API key save failed: ${String(error)}`);
+          setNotice(`API key save failed: ${String(error)}`);
         });
     }, 500);
 
@@ -565,6 +607,13 @@ function App() {
       setBaseUrl(GOOGLE_BASE_URL);
       setModels(GOOGLE_MODELS);
       setNotice("Google provider selected");
+      return;
+    }
+
+    if (provider === "Cerebras") {
+      setBaseUrl(CEREBRAS_BASE_URL);
+      setModels(CEREBRAS_MODELS);
+      setNotice("Cerebras provider selected");
       return;
     }
 
@@ -938,7 +987,7 @@ function App() {
     await loadTextFile(file);
   };
 
-  const isGoogle = provider === "Google";
+  const isKeyRequired = provider === "Google" || provider === "Cerebras";
 
   return (
     <div className="app-shell">
@@ -951,7 +1000,7 @@ function App() {
               </div>
               <div>
                 <h1>AI Universal Translator</h1>
-                <p>LM Studio and Google compatible desktop translator</p>
+                <p>LM Studio, Google and Cerebras compatible desktop translator</p>
               </div>
             </div>
           </header>
@@ -972,26 +1021,26 @@ function App() {
                   <span>Provider</span>
                   <span className="status-chip provider-status">{notice}</span>
                 </div>
-                <div className="segmented-control">
+                <select value={provider} onChange={(event) => setProvider(event.target.value as Provider)}>
                   {PROVIDERS.map((item) => (
-                    <button key={item} type="button" className={provider === item ? "selected" : ""} onClick={() => setProvider(item)}>
+                    <option key={item} value={item}>
                       {item}
-                    </button>
+                    </option>
                   ))}
-                </div>
+                </select>
               </label>
 
-              {isGoogle && (
+              {isKeyRequired && (
                 <label className="field">
-                  <span>Google API Key</span>
-                  <input value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Enter Google API Key here..." type="password" />
+                  <span>{provider} API Key</span>
+                  <input value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={`Enter ${provider} API Key here...`} type="password" />
                   <small>The API key is stored in Windows Credential Manager</small>
                 </label>
               )}
 
               <label className="field">
                 <span>Server URL</span>
-                <input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} disabled={isGoogle} />
+                <input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} disabled={isKeyRequired} />
                 <small>API endpoint address</small>
               </label>
 
@@ -1002,6 +1051,8 @@ function App() {
                     const val = event.target.value;
                     if (provider === "Google") {
                       setGoogleModel(val);
+                    } else if (provider === "Cerebras") {
+                      setCerebrasModel(val);
                     } else {
                       setLmStudioModel(val);
                     }
@@ -1012,7 +1063,7 @@ function App() {
                       </option>
                     ))}
                   </select>
-                  {!isGoogle && (
+                  {provider === "LM Studio" && (
                     <button className="icon-button compact" type="button" onClick={() => void syncModels()} disabled={isSyncingModels} aria-label="Sync models">
                       <RefreshCw size={17} className={isSyncingModels ? "spinning" : ""} />
                     </button>

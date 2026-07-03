@@ -26,6 +26,8 @@ export interface AiRequest {
   apiKey?: string;
   chunkSize: number;
   originalFileName?: string;
+  startChunk?: number;
+  existingOutput?: string;
 }
 
 export interface StreamPayload {
@@ -36,6 +38,7 @@ export interface StreamPayload {
   progress?: string;
   outputPath?: string;
   error?: string;
+  completedChunks?: number;
 }
 
 export interface FileTranslationResult {

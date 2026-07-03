@@ -14,6 +14,7 @@ import {
   Moon,
   RefreshCw,
   Square,
+  RotateCcw,
   Sun,
   Upload,
   WandSparkles,
@@ -415,6 +416,7 @@ const runBrowserTextOperation = async (
   operation: "translate" | "summarize",
   onUpdate: (output: string, progress: string) => void,
   signal: AbortSignal,
+  onChunkStart?: (chunkIndex: number, accumulatedOutput: string) => void,
 ) => {
   if (!request.text.trim()) {
     onUpdate("", "");
@@ -423,9 +425,15 @@ const runBrowserTextOperation = async (
 
   const chunks = splitTextIntoChunks(request.text, request.chunkSize);
   const totalChunks = chunks.length;
-  let fullOutput = "";
+  const startIndex = request.startChunk ?? 0;
+  let fullOutput = request.existingOutput ?? "";
 
-  for (const [index, chunk] of chunks.entries()) {
+  for (let index = startIndex; index < totalChunks; index++) {
+    if (signal.aborted) throw new DOMException("The operation was aborted.", "AbortError");
+
+    onChunkStart?.(index, fullOutput);
+
+    const chunk = chunks[index];
     const progress =
       operation === "translate"
         ? `Processing chunk ${index + 1} of ${totalChunks}...`
@@ -460,6 +468,7 @@ const runBrowserFileTranslation = async (
   request: AiRequest,
   onUpdate: (output: string, progress: string) => void,
   signal: AbortSignal,
+  onChunkStart?: (chunkIndex: number, accumulatedOutput: string) => void,
 ): Promise<FileTranslationResult> => {
   if (!request.text.trim()) {
     const output = "Please upload a file first.";
@@ -469,12 +478,16 @@ const runBrowserFileTranslation = async (
 
   const chunks = splitTextIntoChunks(request.text, request.chunkSize);
   const totalChunks = chunks.length;
-  let fullTranslation = "";
-  onUpdate("", `Starting translation of ${totalChunks} chunks...`);
+  const startIndex = request.startChunk ?? 0;
+  let fullTranslation = request.existingOutput ?? "";
+  onUpdate(fullTranslation, `Starting translation of ${totalChunks} chunks...`);
 
-  for (const [index, chunk] of chunks.entries()) {
+  for (let index = startIndex; index < totalChunks; index++) {
     if (signal.aborted) throw new DOMException("The operation was aborted.", "AbortError");
 
+    onChunkStart?.(index, fullTranslation);
+
+    const chunk = chunks[index];
     const prompt = createFormattedPrompt(request.sourceLang ?? "Auto Detect", request.targetLang, chunk);
     const progress = `Translating chunk ${index + 1} of ${totalChunks}...`;
     const response = await postBrowserChatCompletion(request, prompt, true, signal);
@@ -557,6 +570,10 @@ function App() {
   const [summaryPath, setSummaryPath] = useState("");
   const [isSummaryRunning, setIsSummaryRunning] = useState(false);
 
+  const [canResumeText, setCanResumeText] = useState(false);
+  const [canResumeFile, setCanResumeFile] = useState(false);
+  const [canResumeSummary, setCanResumeSummary] = useState(false);
+
   const textTaskId = useRef("");
   const fileTaskId = useRef("");
   const summaryTaskId = useRef("");
@@ -564,6 +581,8 @@ function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const savedApiKeyRef = useRef("");
   const currentKeyProviderRef = useRef<Provider | null>(null);
+  const resumeInfo = useRef<Partial<Record<TabId, { startChunk: number; existingOutput: string; inputText: string; chunkSize: number }>>>({});
+  const cleanOutputRef = useRef<{ text: string; file: string; summary: string }>({ text: "", file: "", summary: "" });
 
   const baseRequest = useMemo(
     () => ({
@@ -711,24 +730,75 @@ function App() {
 
     listen<StreamPayload>("ai-stream", ({ payload }) => {
       if (payload.target === "text" && payload.taskId === textTaskId.current) {
+        if (payload.status === "progress" && payload.output !== undefined) {
+          cleanOutputRef.current.text = payload.output;
+        }
         if (payload.output !== undefined) setOutputText(payload.output);
         if (payload.progress) setTextProgress(payload.progress);
         if (payload.outputPath) setTextPath(payload.outputPath);
-        if (["done", "error", "cancelled"].includes(payload.status)) setIsTextRunning(false);
+        if (["done", "error", "cancelled"].includes(payload.status)) {
+          setIsTextRunning(false);
+          if (["error", "cancelled"].includes(payload.status) && payload.completedChunks !== undefined && payload.completedChunks > 0) {
+            resumeInfo.current.text = {
+              startChunk: payload.completedChunks,
+              existingOutput: cleanOutputRef.current.text,
+              inputText,
+              chunkSize: clampNumber(textChunkSize, 100, 5000),
+            };
+            setCanResumeText(true);
+          } else {
+            resumeInfo.current.text = undefined;
+            setCanResumeText(false);
+          }
+        }
       }
 
       if (payload.target === "file" && payload.taskId === fileTaskId.current) {
+        if (payload.status === "progress" && payload.output !== undefined) {
+          cleanOutputRef.current.file = payload.output;
+        }
         if (payload.output !== undefined) setFilePreview(payload.output);
         if (payload.progress) setFileProgress(payload.progress);
         if (payload.outputPath) setFilePath(payload.outputPath);
-        if (["done", "error", "cancelled"].includes(payload.status)) setIsFileRunning(false);
+        if (["done", "error", "cancelled"].includes(payload.status)) {
+          setIsFileRunning(false);
+          if (["error", "cancelled"].includes(payload.status) && payload.completedChunks !== undefined && payload.completedChunks > 0) {
+            resumeInfo.current.file = {
+              startChunk: payload.completedChunks,
+              existingOutput: cleanOutputRef.current.file,
+              inputText: fileContent,
+              chunkSize: clampNumber(fileChunkSize, 100, 5000),
+            };
+            setCanResumeFile(true);
+          } else {
+            resumeInfo.current.file = undefined;
+            setCanResumeFile(false);
+          }
+        }
       }
 
       if (payload.target === "summary" && payload.taskId === summaryTaskId.current) {
+        if (payload.status === "progress" && payload.output !== undefined) {
+          cleanOutputRef.current.summary = payload.output;
+        }
         if (payload.output !== undefined) setSummaryOutput(payload.output);
         if (payload.progress) setSummaryProgress(payload.progress);
         if (payload.outputPath) setSummaryPath(payload.outputPath);
-        if (["done", "error", "cancelled"].includes(payload.status)) setIsSummaryRunning(false);
+        if (["done", "error", "cancelled"].includes(payload.status)) {
+          setIsSummaryRunning(false);
+          if (["error", "cancelled"].includes(payload.status) && payload.completedChunks !== undefined && payload.completedChunks > 0) {
+            resumeInfo.current.summary = {
+              startChunk: payload.completedChunks,
+              existingOutput: cleanOutputRef.current.summary,
+              inputText: summaryInput,
+              chunkSize: clampNumber(summaryChunkSize, 100, 100000),
+            };
+            setCanResumeSummary(true);
+          } else {
+            resumeInfo.current.summary = undefined;
+            setCanResumeSummary(false);
+          }
+        }
       }
 
       if (payload.error) setNotice(payload.error);
@@ -798,16 +868,24 @@ function App() {
     delete browserTaskControllers.current[target];
   };
 
-  const translateText = async () => {
+  const translateText = async (resume?: { startChunk: number; existingOutput: string }) => {
     const taskId = createTaskId("text");
     textTaskId.current = taskId;
-    setTextPath("");
-    setOutputText("");
-    setTextProgress("Starting translation...");
+    setCanResumeText(false);
+    if (!resume) {
+      setTextPath("");
+      setOutputText("");
+      cleanOutputRef.current.text = "";
+    }
+    setTextProgress(resume ? `Resuming from chunk ${resume.startChunk + 1}...` : "Starting translation...");
     setIsTextRunning(true);
 
     try {
       const request = buildTextRequest(inputText, clampNumber(textChunkSize, 100, 5000), sourceLang);
+      if (resume) {
+        request.startChunk = resume.startChunk;
+        request.existingOutput = resume.existingOutput;
+      }
       const finalText = isTauriRuntime()
         ? await callTauri<string>("translate_text", { taskId, target: "text", request })
         : await runBrowserTextOperation(
@@ -818,15 +896,28 @@ function App() {
               setTextProgress(progress);
             },
             createBrowserAbortController("text").signal,
+            (chunkIndex, accumulatedOutput) => {
+              cleanOutputRef.current.text = accumulatedOutput;
+              resumeInfo.current.text = {
+                startChunk: chunkIndex,
+                existingOutput: accumulatedOutput,
+                inputText,
+                chunkSize: clampNumber(textChunkSize, 100, 5000),
+              };
+            },
           );
       setOutputText(finalText);
+      resumeInfo.current.text = undefined;
+      setCanResumeText(false);
     } catch (error) {
       if (isAbortError(error)) {
         setTextProgress("Cancelled");
         setNotice("Translation cancelled.");
+        if (resumeInfo.current.text && resumeInfo.current.text.startChunk > 0) setCanResumeText(true);
       } else {
         setTextProgress("Error");
         setNotice(`Translation failed: ${String(error)}`);
+        if (resumeInfo.current.text && resumeInfo.current.text.startChunk > 0) setCanResumeText(true);
       }
     } finally {
       setIsTextRunning(false);
@@ -834,16 +925,24 @@ function App() {
     }
   };
 
-  const summarizeText = async () => {
+  const summarizeText = async (resume?: { startChunk: number; existingOutput: string }) => {
     const taskId = createTaskId("summary");
     summaryTaskId.current = taskId;
-    setSummaryPath("");
-    setSummaryOutput("");
-    setSummaryProgress("Starting summary...");
+    setCanResumeSummary(false);
+    if (!resume) {
+      setSummaryPath("");
+      setSummaryOutput("");
+      cleanOutputRef.current.summary = "";
+    }
+    setSummaryProgress(resume ? `Resuming from chunk ${resume.startChunk + 1}...` : "Starting summary...");
     setIsSummaryRunning(true);
 
     try {
       const request = buildTextRequest(summaryInput, clampNumber(summaryChunkSize, 100, 100000));
+      if (resume) {
+        request.startChunk = resume.startChunk;
+        request.existingOutput = resume.existingOutput;
+      }
       const finalSummary = isTauriRuntime()
         ? await callTauri<string>("summarize_text", { taskId, target: "summary", request })
         : await runBrowserTextOperation(
@@ -854,15 +953,28 @@ function App() {
               setSummaryProgress(progress);
             },
             createBrowserAbortController("summary").signal,
+            (chunkIndex, accumulatedOutput) => {
+              cleanOutputRef.current.summary = accumulatedOutput;
+              resumeInfo.current.summary = {
+                startChunk: chunkIndex,
+                existingOutput: accumulatedOutput,
+                inputText: summaryInput,
+                chunkSize: clampNumber(summaryChunkSize, 100, 100000),
+              };
+            },
           );
       setSummaryOutput(finalSummary);
+      resumeInfo.current.summary = undefined;
+      setCanResumeSummary(false);
     } catch (error) {
       if (isAbortError(error)) {
         setSummaryProgress("Cancelled");
         setNotice("Summary cancelled.");
+        if (resumeInfo.current.summary && resumeInfo.current.summary.startChunk > 0) setCanResumeSummary(true);
       } else {
         setSummaryProgress("Error");
         setNotice(`Summary failed: ${String(error)}`);
+        if (resumeInfo.current.summary && resumeInfo.current.summary.startChunk > 0) setCanResumeSummary(true);
       }
     } finally {
       setIsSummaryRunning(false);
@@ -870,16 +982,24 @@ function App() {
     }
   };
 
-  const translateFile = async () => {
+  const translateFile = async (resume?: { startChunk: number; existingOutput: string }) => {
     const taskId = createTaskId("file");
     fileTaskId.current = taskId;
-    setFilePath("");
-    setFilePreview("");
-    setFileProgress("Starting file translation...");
+    setCanResumeFile(false);
+    if (!resume) {
+      setFilePath("");
+      setFilePreview("");
+      cleanOutputRef.current.file = "";
+    }
+    setFileProgress(resume ? `Resuming from chunk ${resume.startChunk + 1}...` : "Starting file translation...");
     setIsFileRunning(true);
 
     try {
       const request = buildTextRequest(fileContent, clampNumber(fileChunkSize, 100, 5000), sourceLang, fileName);
+      if (resume) {
+        request.startChunk = resume.startChunk;
+        request.existingOutput = resume.existingOutput;
+      }
       const result = isTauriRuntime()
         ? await callTauri<FileTranslationResult>("translate_file", { taskId, target: "file", request })
         : await runBrowserFileTranslation(
@@ -889,16 +1009,29 @@ function App() {
               setFileProgress(progress);
             },
             createBrowserAbortController("file").signal,
+            (chunkIndex, accumulatedOutput) => {
+              cleanOutputRef.current.file = accumulatedOutput;
+              resumeInfo.current.file = {
+                startChunk: chunkIndex,
+                existingOutput: accumulatedOutput,
+                inputText: fileContent,
+                chunkSize: clampNumber(fileChunkSize, 100, 5000),
+              };
+            },
           );
       setFilePreview(result.output);
       if (result.outputPath) setFilePath(result.outputPath);
+      resumeInfo.current.file = undefined;
+      setCanResumeFile(false);
     } catch (error) {
       if (isAbortError(error)) {
         setFileProgress("Cancelled");
         setNotice("File translation cancelled.");
+        if (resumeInfo.current.file && resumeInfo.current.file.startChunk > 0) setCanResumeFile(true);
       } else {
         setFileProgress("Error");
         setNotice(`File translation failed: ${String(error)}`);
+        if (resumeInfo.current.file && resumeInfo.current.file.startChunk > 0) setCanResumeFile(true);
       }
     } finally {
       setIsFileRunning(false);
@@ -920,6 +1053,33 @@ function App() {
     }
 
     browserTaskControllers.current[target]?.abort();
+  };
+
+  const resumeText = () => {
+    const info = resumeInfo.current.text;
+    if (!info) return;
+    setOutputText(info.existingOutput);
+    setTextProgress("Resuming...");
+    setNotice("Resuming translation...");
+    void translateText({ startChunk: info.startChunk, existingOutput: info.existingOutput });
+  };
+
+  const resumeFile = () => {
+    const info = resumeInfo.current.file;
+    if (!info) return;
+    setFilePreview(info.existingOutput);
+    setFileProgress("Resuming...");
+    setNotice("Resuming file translation...");
+    void translateFile({ startChunk: info.startChunk, existingOutput: info.existingOutput });
+  };
+
+  const resumeSummary = () => {
+    const info = resumeInfo.current.summary;
+    if (!info) return;
+    setSummaryOutput(info.existingOutput);
+    setSummaryProgress("Resuming...");
+    setNotice("Resuming summary...");
+    void summarizeText({ startChunk: info.startChunk, existingOutput: info.existingOutput });
   };
 
   const saveText = async (text: string, fileNameForSave: string, onSaved: (path: string) => void) => {
@@ -1233,6 +1393,8 @@ function App() {
               onCopy={() => copyText(outputText)}
               onSave={() => saveText(outputText, "translated.txt", setTextPath)}
               savedPath={textPath}
+              canResume={canResumeText}
+              onResume={resumeText}
             />
           )}
 
@@ -1295,10 +1457,17 @@ function App() {
               </div>
 
               <div className="action-row">
-                <button className="primary-button" type="button" onClick={translateFile} disabled={isFileRunning || !fileContent}>
-                  <Languages size={17} />
-                  Translate File
-                </button>
+                {canResumeFile ? (
+                  <button className="primary-button" type="button" onClick={resumeFile} disabled={isFileRunning || !fileContent}>
+                    <RotateCcw size={17} />
+                    Resume
+                  </button>
+                ) : (
+                  <button className="primary-button" type="button" onClick={() => translateFile()} disabled={isFileRunning || !fileContent}>
+                    <Languages size={17} />
+                    Translate File
+                  </button>
+                )}
                 <button className="secondary-button" type="button" onClick={() => cancelTask("file")} disabled={!isFileRunning}>
                   <Square size={15} />
                   Stop
@@ -1338,6 +1507,8 @@ function App() {
               onCopy={() => copyText(summaryOutput)}
               onSave={() => saveText(summaryOutput, "summary.txt", setSummaryPath)}
               savedPath={summaryPath}
+              canResume={canResumeSummary}
+              onResume={resumeSummary}
             />
           )}
         </section>
@@ -1382,6 +1553,8 @@ interface ModePanelProps {
   onCopy: () => void;
   onSave: () => void;
   savedPath: string;
+  canResume?: boolean;
+  onResume?: () => void;
 }
 
 function ModePanel({
@@ -1404,6 +1577,8 @@ function ModePanel({
   onCopy,
   onSave,
   savedPath,
+  canResume,
+  onResume,
 }: ModePanelProps) {
   return (
     <div className="mode-panel">
@@ -1435,10 +1610,17 @@ function ModePanel({
           <Clipboard size={16} />
           Paste Input
         </button>
-        <button className="primary-button" type="button" onClick={onPrimary} disabled={isRunning || !inputValue.trim()}>
-          <Languages size={17} />
-          {primaryLabel}
-        </button>
+        {canResume && onResume ? (
+          <button className="primary-button" type="button" onClick={onResume} disabled={isRunning || !inputValue.trim()}>
+            <RotateCcw size={17} />
+            Resume
+          </button>
+        ) : (
+          <button className="primary-button" type="button" onClick={onPrimary} disabled={isRunning || !inputValue.trim()}>
+            <Languages size={17} />
+            {primaryLabel}
+          </button>
+        )}
         <button className="secondary-button" type="button" onClick={onStop} disabled={!isRunning}>
           <Square size={15} />
           Stop

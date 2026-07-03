@@ -52,6 +52,8 @@ struct AiRequest {
     api_key: Option<String>,
     chunk_size: usize,
     original_file_name: Option<String>,
+    start_chunk: Option<usize>,
+    existing_output: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -64,6 +66,7 @@ struct StreamPayload {
     progress: Option<String>,
     output_path: Option<String>,
     error: Option<String>,
+    completed_chunks: Option<usize>,
 }
 
 #[derive(Debug, Serialize)]
@@ -510,6 +513,7 @@ async fn translate_file(
                 progress: Some("No file content".to_string()),
                 output_path: None,
                 error: Some(output.clone()),
+                completed_chunks: None,
             },
         );
         return Ok(FileTranslationResult {
@@ -521,7 +525,8 @@ async fn translate_file(
     let client = Client::new();
     let chunks = split_text_into_chunks(&request.text, request.chunk_size.max(1));
     let total_chunks = chunks.len();
-    let mut full_translation = String::new();
+    let start_index = request.start_chunk.unwrap_or(0).min(total_chunks);
+    let mut full_translation = request.existing_output.clone().unwrap_or_default();
 
     emit_stream(
         &app,
@@ -529,14 +534,15 @@ async fn translate_file(
             task_id: task_id.clone(),
             target: target.clone(),
             status: "progress".to_string(),
-            output: Some(String::new()),
+            output: Some(full_translation.clone()),
             progress: Some(format!("Starting translation of {total_chunks} chunks...")),
             output_path: None,
             error: None,
+            completed_chunks: Some(start_index),
         },
     );
 
-    for (index, chunk) in chunks.iter().enumerate() {
+    for (index, chunk) in chunks.iter().enumerate().skip(start_index) {
         if is_cancelled(state.inner(), &task_id) {
             clear_cancelled(state.inner(), &task_id);
             emit_stream(
@@ -549,6 +555,7 @@ async fn translate_file(
                     progress: Some("Cancelled".to_string()),
                     output_path: None,
                     error: None,
+                    completed_chunks: Some(index),
                 },
             );
             return Ok(FileTranslationResult {
@@ -576,6 +583,7 @@ async fn translate_file(
                 )),
                 output_path: None,
                 error: None,
+                completed_chunks: None,
             },
         );
 
@@ -608,6 +616,7 @@ async fn translate_file(
                                 progress: Some("Cancelled".to_string()),
                                 output_path: None,
                                 error: None,
+                                completed_chunks: Some(index),
                             },
                         );
                         return Ok(FileTranslationResult {
@@ -616,20 +625,44 @@ async fn translate_file(
                         });
                     }
                     Err(error) => {
-                        full_translation.push_str(&format!(
-                            "\n[Error translating chunk {}: {}]\n",
-                            index + 1,
-                            error
-                        ));
+                        emit_stream(
+                            &app,
+                            StreamPayload {
+                                task_id,
+                                target,
+                                status: "error".to_string(),
+                                output: Some(full_translation.clone()),
+                                progress: Some(format!("Error on chunk {}", index + 1)),
+                                output_path: None,
+                                error: Some(error),
+                                completed_chunks: Some(index),
+                            },
+                        );
+                        return Ok(FileTranslationResult {
+                            output: full_translation,
+                            output_path: None,
+                        });
                     }
                 }
             }
             Err(error) => {
-                full_translation.push_str(&format!(
-                    "\n[Error translating chunk {}: {}]\n",
-                    index + 1,
-                    error
-                ));
+                emit_stream(
+                    &app,
+                    StreamPayload {
+                        task_id,
+                        target,
+                        status: "error".to_string(),
+                        output: Some(full_translation.clone()),
+                        progress: Some(format!("Error on chunk {}", index + 1)),
+                        output_path: None,
+                        error: Some(error),
+                        completed_chunks: Some(index),
+                    },
+                );
+                return Ok(FileTranslationResult {
+                    output: full_translation,
+                    output_path: None,
+                });
             }
         }
 
@@ -643,6 +676,7 @@ async fn translate_file(
                 progress: Some(format!("Completed {} of {total_chunks} chunks.", index + 1)),
                 output_path: None,
                 error: None,
+                completed_chunks: None,
             },
         );
     }
@@ -661,6 +695,7 @@ async fn translate_file(
             progress: Some("Done".to_string()),
             output_path: Some(output_path.clone()),
             error: None,
+            completed_chunks: Some(total_chunks),
         },
     );
 
@@ -752,6 +787,7 @@ async fn run_streaming_chunks(
                 progress: Some(String::new()),
                 output_path: None,
                 error: None,
+                completed_chunks: None,
             },
         );
         return Ok(String::new());
@@ -760,9 +796,10 @@ async fn run_streaming_chunks(
     let client = Client::new();
     let chunks = split_text_into_chunks(&request.text, request.chunk_size.max(1));
     let total_chunks = chunks.len();
-    let mut full_output = String::new();
+    let start_index = request.start_chunk.unwrap_or(0).min(total_chunks);
+    let mut full_output = request.existing_output.clone().unwrap_or_default();
 
-    for (index, chunk) in chunks.iter().enumerate() {
+    for (index, chunk) in chunks.iter().enumerate().skip(start_index) {
         if is_cancelled(state, &task_id) {
             clear_cancelled(state, &task_id);
             emit_stream(
@@ -775,6 +812,7 @@ async fn run_streaming_chunks(
                     progress: Some("Cancelled".to_string()),
                     output_path: None,
                     error: None,
+                    completed_chunks: Some(index),
                 },
             );
             return Ok(full_output);
@@ -795,6 +833,7 @@ async fn run_streaming_chunks(
                 progress: Some(progress),
                 output_path: None,
                 error: None,
+                completed_chunks: None,
             },
         );
 
@@ -811,7 +850,6 @@ async fn run_streaming_chunks(
             Ok(response) => response,
             Err(error) => {
                 let message = format_stream_error(&request, &operation, index + 1, &error);
-                full_output.push_str(&message);
                 emit_stream(
                     &app,
                     StreamPayload {
@@ -821,7 +859,8 @@ async fn run_streaming_chunks(
                         output: Some(full_output.clone()),
                         progress: Some(format!("Error on chunk {}", index + 1)),
                         output_path: None,
-                        error: Some(error),
+                        error: Some(message),
+                        completed_chunks: Some(index),
                     },
                 );
                 return Ok(full_output);
@@ -854,6 +893,7 @@ async fn run_streaming_chunks(
                         progress: Some(progress),
                         output_path: None,
                         error: None,
+                        completed_chunks: None,
                     },
                 );
             }
@@ -870,13 +910,13 @@ async fn run_streaming_chunks(
                         progress: Some("Cancelled".to_string()),
                         output_path: None,
                         error: None,
+                        completed_chunks: Some(index),
                     },
                 );
                 return Ok(full_output);
             }
             Err(error) => {
                 let message = format_stream_error(&request, &operation, index + 1, &error);
-                full_output.push_str(&message);
                 emit_stream(
                     &app,
                     StreamPayload {
@@ -886,7 +926,8 @@ async fn run_streaming_chunks(
                         output: Some(full_output.clone()),
                         progress: Some(format!("Error on chunk {}", index + 1)),
                         output_path: None,
-                        error: Some(error),
+                        error: Some(message),
+                        completed_chunks: Some(index),
                     },
                 );
                 return Ok(full_output);
@@ -905,6 +946,7 @@ async fn run_streaming_chunks(
             progress: Some("Done".to_string()),
             output_path: None,
             error: None,
+            completed_chunks: Some(total_chunks),
         },
     );
 
@@ -950,6 +992,7 @@ async fn read_streaming_response(
                         progress: None,
                         output_path: None,
                         error: None,
+                        completed_chunks: None,
                     },
                 );
             }

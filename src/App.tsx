@@ -47,6 +47,13 @@ const clampNumber = (value: number, minimum: number, maximum: number) => {
   if (Number.isNaN(value)) return minimum;
   return Math.min(Math.max(value, minimum), maximum);
 };
+const readInitialChunkSize = (key: string, fallback: number, minimum: number, maximum: number) => {
+  const saved = localStorage.getItem(key);
+  if (saved === null) return fallback;
+  const parsed = Number(saved);
+  if (Number.isNaN(parsed)) return fallback;
+  return clampNumber(parsed, minimum, maximum);
+};
 
 const createTaskId = (target: TabId) => {
   const randomPart = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
@@ -529,7 +536,7 @@ function App() {
 
   const [inputText, setInputText] = useState("");
   const [outputText, setOutputText] = useState("");
-  const [textChunkSize, setTextChunkSize] = useState(1500);
+  const [textChunkSize, setTextChunkSize] = useState(readInitialChunkSize("textChunkSize", 1500, 100, 5000));
   const [textProgress, setTextProgress] = useState("Ready");
   const [textPath, setTextPath] = useState("");
   const [isTextRunning, setIsTextRunning] = useState(false);
@@ -537,7 +544,7 @@ function App() {
   const [fileName, setFileName] = useState("");
   const [fileContent, setFileContent] = useState("");
   const [filePreview, setFilePreview] = useState("");
-  const [fileChunkSize, setFileChunkSize] = useState(1500);
+  const [fileChunkSize, setFileChunkSize] = useState(readInitialChunkSize("fileChunkSize", 1500, 100, 5000));
   const [filePath, setFilePath] = useState("");
   const [fileProgress, setFileProgress] = useState("Ready");
   const [isFileRunning, setIsFileRunning] = useState(false);
@@ -545,7 +552,7 @@ function App() {
 
   const [summaryInput, setSummaryInput] = useState("");
   const [summaryOutput, setSummaryOutput] = useState("");
-  const [summaryChunkSize, setSummaryChunkSize] = useState(2000);
+  const [summaryChunkSize, setSummaryChunkSize] = useState(readInitialChunkSize("summaryChunkSize", 2000, 100, 100000));
   const [summaryProgress, setSummaryProgress] = useState("Ready");
   const [summaryPath, setSummaryPath] = useState("");
   const [isSummaryRunning, setIsSummaryRunning] = useState(false);
@@ -616,6 +623,18 @@ function App() {
       localStorage.setItem("modelName", ollamaCloudModel);
     }
   }, [ollamaCloudModel, provider]);
+  useEffect(() => {
+    localStorage.setItem("textChunkSize", String(textChunkSize));
+  }, [textChunkSize]);
+
+  useEffect(() => {
+    localStorage.setItem("fileChunkSize", String(fileChunkSize));
+  }, [fileChunkSize]);
+
+  useEffect(() => {
+    localStorage.setItem("summaryChunkSize", String(summaryChunkSize));
+  }, [summaryChunkSize]);
+
 
   useEffect(() => {
     if (!isTauriRuntime()) return;

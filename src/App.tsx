@@ -907,8 +907,10 @@ function App() {
             },
           );
       setOutputText(finalText);
-      resumeInfo.current.text = undefined;
-      setCanResumeText(false);
+      if (!resumeInfo.current.text) {
+        resumeInfo.current.text = undefined;
+        setCanResumeText(false);
+      }
     } catch (error) {
       if (isAbortError(error)) {
         setTextProgress("Cancelled");
@@ -964,8 +966,10 @@ function App() {
             },
           );
       setSummaryOutput(finalSummary);
-      resumeInfo.current.summary = undefined;
-      setCanResumeSummary(false);
+      if (!resumeInfo.current.summary) {
+        resumeInfo.current.summary = undefined;
+        setCanResumeSummary(false);
+      }
     } catch (error) {
       if (isAbortError(error)) {
         setSummaryProgress("Cancelled");
@@ -1021,8 +1025,10 @@ function App() {
           );
       setFilePreview(result.output);
       if (result.outputPath) setFilePath(result.outputPath);
-      resumeInfo.current.file = undefined;
-      setCanResumeFile(false);
+      if (!resumeInfo.current.file) {
+        resumeInfo.current.file = undefined;
+        setCanResumeFile(false);
+      }
     } catch (error) {
       if (isAbortError(error)) {
         setFileProgress("Cancelled");

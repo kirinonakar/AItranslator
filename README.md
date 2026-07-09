@@ -97,7 +97,8 @@ Source languages:
 - English
 - Korean
 - Japanese
-- Chinese
+- Chinese (Simplified)
+- Chinese (Traditional)
 - Spanish
 - French
 - German
@@ -108,7 +109,8 @@ Target languages:
 - English
 - Korean
 - Japanese
-- Chinese
+- Chinese (Simplified)
+- Chinese (Traditional)
 - Spanish
 - French
 - German

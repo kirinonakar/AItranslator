@@ -32,6 +32,8 @@ const CEREBRAS_CREDENTIAL_TARGET: &str = "AI Universal Translator: Cerebras API 
 const CEREBRAS_CREDENTIAL_USER: &str = "API Key";
 const OLLAMA_CLOUD_CREDENTIAL_TARGET: &str = "AI Universal Translator: Ollama Cloud API Key";
 const OLLAMA_CLOUD_CREDENTIAL_USER: &str = "API Key";
+const UNSLOTH_DESKTOP_CREDENTIAL_TARGET: &str = "AI Universal Translator: Unsloth Desktop API Key";
+const UNSLOTH_DESKTOP_CREDENTIAL_USER: &str = "API Key";
 const BEARER_PREFIX: &str = "Bearer ";
 
 #[derive(Default)]
@@ -47,6 +49,8 @@ struct AiRequest {
     target_lang: String,
     model_name: String,
     temperature: f32,
+    #[serde(default)]
+    thinking: Option<String>,
     provider: String,
     base_url: String,
     api_key: Option<String>,
@@ -228,6 +232,67 @@ fn save_ollama_cloud_api_key(api_key: String) -> Result<(), String> {
 #[cfg(not(windows))]
 #[tauri::command]
 fn save_ollama_cloud_api_key(api_key: String) -> Result<(), String> {
+    if normalize_google_api_key(&api_key).is_empty() {
+        Ok(())
+    } else {
+        Err("Windows Credential Manager is only available on Windows.".to_string())
+    }
+}
+
+#[cfg(windows)]
+#[tauri::command]
+fn load_unsloth_desktop_api_key() -> Result<String, String> {
+    match read_credential_api_key(UNSLOTH_DESKTOP_CREDENTIAL_TARGET) {
+        Ok(Some(api_key)) => Ok(api_key),
+        Ok(None) => Ok(String::new()),
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+fn load_unsloth_desktop_api_key() -> Result<String, String> {
+    Ok(String::new())
+}
+
+#[cfg(windows)]
+#[tauri::command]
+fn save_unsloth_desktop_api_key(api_key: String) -> Result<(), String> {
+    let api_key = normalize_google_api_key(&api_key);
+    if api_key.is_empty() {
+        delete_credential(UNSLOTH_DESKTOP_CREDENTIAL_TARGET)
+    } else {
+        let mut secret = api_key.into_bytes();
+        if secret.len() > CRED_MAX_CREDENTIAL_BLOB_SIZE as usize {
+            return Err(
+                "Unsloth Desktop API key is too long for Windows Credential Manager.".to_string(),
+            );
+        }
+
+        let mut target_name = to_wide(UNSLOTH_DESKTOP_CREDENTIAL_TARGET);
+        let mut user_name = to_wide(UNSLOTH_DESKTOP_CREDENTIAL_USER);
+        let mut comment = to_wide("Unsloth Desktop API key for AI Universal Translator");
+        let mut credential = CREDENTIALW::default();
+        credential.Type = CRED_TYPE_GENERIC;
+        credential.TargetName = target_name.as_mut_ptr();
+        credential.Comment = comment.as_mut_ptr();
+        credential.CredentialBlobSize = secret.len() as u32;
+        credential.CredentialBlob = secret.as_mut_ptr();
+        credential.Persist = CRED_PERSIST_LOCAL_MACHINE;
+        credential.UserName = user_name.as_mut_ptr();
+
+        let ok = unsafe { CredWriteW(&credential, 0) };
+        if ok == 0 {
+            Err(credential_error("write", unsafe { GetLastError() }))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+fn save_unsloth_desktop_api_key(api_key: String) -> Result<(), String> {
     if normalize_google_api_key(&api_key).is_empty() {
         Ok(())
     } else {
@@ -1092,26 +1157,58 @@ async fn post_chat_completion(
         } else {
             request_api_key
         }
+    } else if request.provider.eq_ignore_ascii_case("Unsloth Desktop")
+        || request.provider.eq_ignore_ascii_case("UnslothDesktop")
+        || request.provider.eq_ignore_ascii_case("Unsloth")
+    {
+        let request_api_key = request
+            .api_key
+            .as_deref()
+            .map(normalize_google_api_key)
+            .unwrap_or_default();
+        if request_api_key.is_empty() {
+            read_credential_api_key(UNSLOTH_DESKTOP_CREDENTIAL_TARGET)
+                .map(|key| key.unwrap_or_default())?
+        } else {
+            request_api_key
+        }
     } else if request.provider.eq_ignore_ascii_case("Ollama") {
         DEFAULT_OLLAMA_API_KEY.to_string()
     } else {
         DEFAULT_LM_API_KEY.to_string()
     };
 
+    let mut body = json!({
+        "model": request.model_name,
+        "messages": [
+            {
+                "role": "user",
+                "content": prompt,
+            }
+        ],
+        "temperature": request.temperature,
+        "stream": stream,
+    });
+
+    if let Some(thinking) = request
+        .thinking
+        .as_deref()
+        .filter(|value| !value.eq_ignore_ascii_case("default"))
+    {
+        let is_unsloth = request.provider.eq_ignore_ascii_case("Unsloth Desktop")
+            || request.provider.eq_ignore_ascii_case("UnslothDesktop")
+            || request.provider.eq_ignore_ascii_case("Unsloth");
+        if is_unsloth && thinking.eq_ignore_ascii_case("disabled") {
+            body["enable_thinking"] = json!(false);
+        } else {
+            body["thinking"] = json!(thinking);
+        }
+    }
+
     let response = client
         .post(chat_endpoint(&request.base_url))
         .bearer_auth(api_key)
-        .json(&json!({
-            "model": request.model_name,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt,
-                }
-            ],
-            "temperature": request.temperature,
-            "stream": stream,
-        }))
+        .json(&body)
         .send()
         .await
         .map_err(|error| error.to_string())?;
@@ -1334,6 +1431,11 @@ fn format_stream_error(
         "Please ensure Ollama Cloud endpoint is correct and your API Key is valid.".to_string()
     } else if request.provider.eq_ignore_ascii_case("Cerebras") {
         "Please ensure Cerebras endpoint is correct and your API Key is valid.".to_string()
+    } else if request.provider.eq_ignore_ascii_case("Unsloth Desktop")
+        || request.provider.eq_ignore_ascii_case("UnslothDesktop")
+        || request.provider.eq_ignore_ascii_case("Unsloth")
+    {
+        "Please ensure Unsloth Desktop is running, the endpoint is correct, and your API Key is valid.".to_string()
     } else {
         "Please ensure Google endpoint is correct and your API Key is valid.".to_string()
     };
@@ -1483,6 +1585,8 @@ fn main() {
             save_cerebras_api_key,
             load_ollama_cloud_api_key,
             save_ollama_cloud_api_key,
+            load_unsloth_desktop_api_key,
+            save_unsloth_desktop_api_key,
             fetch_provider_models,
             translate_text,
             summarize_text,

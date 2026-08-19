@@ -1,4 +1,5 @@
-export type Provider = "LM Studio" | "Ollama" | "Ollama Cloud" | "Google" | "Cerebras";
+export type Provider = "LM Studio" | "Ollama" | "Ollama Cloud" | "Google" | "Cerebras" | "Unsloth Desktop";
+export type ThinkingLevel = "default" | "disabled" | "low" | "medium" | "high" | "xhigh" | "max";
 export type Language =
   | "Auto Detect"
   | "English"
@@ -22,6 +23,7 @@ export interface AiRequest {
   targetLang: Language;
   modelName: string;
   temperature: number;
+  thinking: ThinkingLevel;
   provider: Provider;
   baseUrl: string;
   apiKey?: string;

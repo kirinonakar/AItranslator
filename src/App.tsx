@@ -30,6 +30,7 @@ import {
   DEFAULT_OLLAMA_API_KEY,
   DEFAULT_OLLAMA_CLOUD_MODEL,
   DEFAULT_OLLAMA_MODEL,
+  DEFAULT_UNSLOTH_DESKTOP_MODEL,
   GOOGLE_BASE_URL,
   GOOGLE_MODELS,
   LM_STUDIO_MODELS,
@@ -41,8 +42,11 @@ import {
   SOURCE_LANGUAGES,
   SUPPORTED_FILE_TYPES,
   TARGET_LANGUAGES,
+  THINKING_LEVELS,
+  UNSLOTH_DESKTOP_BASE_URL,
+  UNSLOTH_DESKTOP_MODELS,
 } from "./constants";
-import type { AiRequest, DroppedTextFile, FileTranslationResult, Language, Provider, StreamPayload, TabId, Theme } from "./types";
+import type { AiRequest, DroppedTextFile, FileTranslationResult, Language, Provider, StreamPayload, TabId, Theme, ThinkingLevel } from "./types";
 
 const clampNumber = (value: number, minimum: number, maximum: number) => {
   if (Number.isNaN(value)) return minimum;
@@ -72,6 +76,7 @@ const getProviderBaseUrl = (provider: Provider) => {
   if (provider === "Cerebras") return CEREBRAS_BASE_URL;
   if (provider === "Ollama") return OLLAMA_BASE_URL;
   if (provider === "Ollama Cloud") return OLLAMA_CLOUD_BASE_URL;
+  if (provider === "Unsloth Desktop") return UNSLOTH_DESKTOP_BASE_URL;
   return DEFAULT_BASE_URL;
 };
 
@@ -80,6 +85,7 @@ const getProviderModels = (provider: Provider) => {
   if (provider === "Cerebras") return CEREBRAS_MODELS;
   if (provider === "Ollama") return OLLAMA_MODELS;
   if (provider === "Ollama Cloud") return OLLAMA_CLOUD_MODELS;
+  if (provider === "Unsloth Desktop") return UNSLOTH_DESKTOP_MODELS;
   return LM_STUDIO_MODELS;
 };
 
@@ -88,6 +94,7 @@ const getProviderDefaultModel = (provider: Provider) => {
   if (provider === "Cerebras") return DEFAULT_CEREBRAS_MODEL;
   if (provider === "Ollama") return DEFAULT_OLLAMA_MODEL;
   if (provider === "Ollama Cloud") return DEFAULT_OLLAMA_CLOUD_MODEL;
+  if (provider === "Unsloth Desktop") return DEFAULT_UNSLOTH_DESKTOP_MODEL;
   return LM_STUDIO_MODELS[0];
 };
 
@@ -96,8 +103,8 @@ const includeSelectedModel = (models: string[], selectedModel: string) => {
   return [selectedModel, ...models];
 };
 
-const providerRequiresApiKey = (provider: Provider) => provider === "Google" || provider === "Cerebras" || provider === "Ollama Cloud";
-const providerSupportsModelSync = (provider: Provider) => provider === "LM Studio" || provider === "Ollama" || provider === "Ollama Cloud";
+const providerRequiresApiKey = (provider: Provider) => provider === "Google" || provider === "Cerebras" || provider === "Ollama Cloud" || provider === "Unsloth Desktop";
+const providerSupportsModelSync = (provider: Provider) => provider === "LM Studio" || provider === "Ollama" || provider === "Ollama Cloud" || provider === "Unsloth Desktop";
 const providerUsesCuratedModelList = (provider: Provider) => provider === "Google" || provider === "Cerebras";
 
 const getStoredModel = (provider: Provider) => {
@@ -123,6 +130,9 @@ const getProviderApiKeyCommands = (provider: Provider) => {
   if (provider === "Ollama Cloud") {
     return { load: "load_ollama_cloud_api_key", save: "save_ollama_cloud_api_key", label: "Ollama Cloud" };
   }
+  if (provider === "Unsloth Desktop") {
+    return { load: "load_unsloth_desktop_api_key", save: "save_unsloth_desktop_api_key", label: "Unsloth Desktop" };
+  }
   return null;
 };
 
@@ -134,8 +144,14 @@ const readInitialProvider = (): Provider => {
   if (normalized === "cerebras") return "Cerebras";
   if (normalized === "ollama") return "Ollama";
   if (normalized === "ollama cloud" || normalized === "ollamacloud") return "Ollama Cloud";
+  if (normalized === "unsloth desktop" || normalized === "unslothdesktop" || normalized === "unsloth") return "Unsloth Desktop";
   if (normalized === "lm studio" || normalized === "lmstudio") return "LM Studio";
   return "LM Studio";
+};
+
+const readInitialThinking = (): ThinkingLevel => {
+  const saved = localStorage.getItem("thinking");
+  return saved && THINKING_LEVELS.includes(saved as ThinkingLevel) ? (saved as ThinkingLevel) : "default";
 };
 
 const readInitialModel = (initialProvider: Provider): string => {
@@ -340,6 +356,11 @@ const postBrowserChatCompletion = async (request: AiRequest, prompt: string, str
         messages: [{ role: "user", content: prompt }],
         temperature: request.temperature,
         stream,
+        ...(request.provider === "Unsloth Desktop" && request.thinking === "disabled"
+          ? { enable_thinking: false }
+          : request.thinking !== "default"
+            ? { thinking: request.thinking }
+            : {}),
       },
     }),
     signal,
@@ -528,6 +549,7 @@ function App() {
   const [lmStudioModel, setLmStudioModel] = useState<string>(() => getStoredModel("LM Studio"));
   const [ollamaModel, setOllamaModel] = useState<string>(() => getStoredModel("Ollama"));
   const [ollamaCloudModel, setOllamaCloudModel] = useState<string>(() => getStoredModel("Ollama Cloud"));
+  const [unslothDesktopModel, setUnslothDesktopModel] = useState<string>(() => getStoredModel("Unsloth Desktop"));
 
   const modelName =
     provider === "Google"
@@ -538,10 +560,13 @@ function App() {
           ? ollamaModel
           : provider === "Ollama Cloud"
             ? ollamaCloudModel
-            : lmStudioModel;
+            : provider === "Unsloth Desktop"
+              ? unslothDesktopModel
+              : lmStudioModel;
 
 
   const [temperature, setTemperature] = useState(0.3);
+  const [thinking, setThinking] = useState<ThinkingLevel>(readInitialThinking);
   const [sourceLang, setSourceLang] = useState<Language>("Auto Detect");
   const [targetLang, setTargetLang] = useState<Language>("Korean");
   const [activeTab, setActiveTab] = useState<TabId>("text");
@@ -590,11 +615,12 @@ function App() {
       targetLang,
       modelName,
       temperature,
+      thinking,
       provider,
       baseUrl,
       apiKey,
     }),
-    [apiKey, baseUrl, modelName, provider, targetLang, temperature],
+    [apiKey, baseUrl, modelName, provider, targetLang, temperature, thinking],
   );
 
   useEffect(() => {
@@ -643,6 +669,17 @@ function App() {
       localStorage.setItem("modelName", ollamaCloudModel);
     }
   }, [ollamaCloudModel, provider]);
+
+  useEffect(() => {
+    localStorage.setItem("modelName_Unsloth Desktop", unslothDesktopModel);
+    if (provider === "Unsloth Desktop") {
+      localStorage.setItem("modelName", unslothDesktopModel);
+    }
+  }, [unslothDesktopModel, provider]);
+
+  useEffect(() => {
+    localStorage.setItem("thinking", thinking);
+  }, [thinking]);
   useEffect(() => {
     localStorage.setItem("textChunkSize", String(textChunkSize));
   }, [textChunkSize]);
@@ -818,7 +855,10 @@ function App() {
     setIsSyncingModels(true);
     setNotice(options?.automatic ? `Auto-syncing ${provider} models...` : `Fetching models from ${provider}...`);
     try {
-      const fetchedModels = await fetchProviderModels(baseUrl, provider === "Ollama Cloud" ? apiKey : undefined);
+      const fetchedModels = await fetchProviderModels(
+        baseUrl,
+        provider === "Ollama Cloud" || provider === "Unsloth Desktop" ? apiKey : undefined,
+      );
       if (fetchedModels.length === 0) {
         setNotice(`Could not fetch models from ${provider}.`);
         return;
@@ -829,6 +869,8 @@ function App() {
         setOllamaModel((prev) => (fetchedModels.includes(prev) ? prev : fetchedModels[0]));
       } else if (provider === "Ollama Cloud") {
         setOllamaCloudModel((prev) => (fetchedModels.includes(prev) ? prev : fetchedModels[0]));
+      } else if (provider === "Unsloth Desktop") {
+        setUnslothDesktopModel((prev) => (fetchedModels.includes(prev) ? prev : fetchedModels[0]));
       } else {
         setLmStudioModel((prev) => (fetchedModels.includes(prev) ? prev : fetchedModels[0]));
       }
@@ -1255,7 +1297,6 @@ function App() {
               </div>
               <div>
                 <h1>AI Universal Translator</h1>
-                <p>LM Studio, Ollama, Google and Cerebras compatible desktop translator</p>
               </div>
             </div>
           </header>
@@ -1289,7 +1330,6 @@ function App() {
                 <label className="field">
                   <span>{provider} API Key</span>
                   <input value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={`Enter ${provider} API Key here...`} type="password" />
-                  <small>The API key is stored in Windows Credential Manager</small>
                 </label>
               )}
 
@@ -1312,6 +1352,8 @@ function App() {
                       setOllamaModel(val);
                     } else if (provider === "Ollama Cloud") {
                       setOllamaCloudModel(val);
+                    } else if (provider === "Unsloth Desktop") {
+                      setUnslothDesktopModel(val);
                     } else {
                       setLmStudioModel(val);
                     }
@@ -1344,7 +1386,17 @@ function App() {
                   />
                   <output>{temperature.toFixed(1)}</output>
                 </div>
-                <small>낮을수록 더 정확합니다.</small>
+              </label>
+
+              <label className="field">
+                <span>Thinking Level</span>
+                <select value={thinking} onChange={(event) => setThinking(event.target.value as ThinkingLevel)}>
+                  {THINKING_LEVELS.map((level) => (
+                    <option value={level} key={level}>
+                      {level === "disabled" ? "disable" : level}
+                    </option>
+                  ))}
+                </select>
               </label>
             </section>
 

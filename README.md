@@ -88,6 +88,7 @@ npm run tauri:build
 * **Google Gemini**: Uses `https://generativelanguage.googleapis.com/v1beta/openai/`. Supports direct key input or auto-import from `gemini.txt` at the root.
 * **Cerebras**: Uses `https://api.cerebras.ai/v1`.
 * **Ollama Cloud**: Uses `https://ollama.com/v1`. Supports model sync.
+* **Unsloth Desktop**: Uses `http://localhost:8888/v1` by default, with a Bearer API key and model sync.
 
 ## Supported Languages
 
@@ -162,4 +163,3 @@ Streaming responses are emitted from Rust to the frontend through Tauri events.
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-

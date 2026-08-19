@@ -1,4 +1,4 @@
-import type { Language, Provider } from "./types";
+import type { Language, Provider, ThinkingLevel } from "./types";
 
 export const DEFAULT_BASE_URL = "http://localhost:1234/v1";
 export const DEFAULT_LM_API_KEY = "lm-studio";
@@ -46,7 +46,13 @@ export const CEREBRAS_MODELS = [
 ];
 export const DEFAULT_CEREBRAS_MODEL = "gemma-4-31b";
 
-export const PROVIDERS: Provider[] = ["LM Studio", "Ollama", "Ollama Cloud", "Google", "Cerebras"];
+export const UNSLOTH_DESKTOP_BASE_URL = "http://localhost:8888/v1";
+export const UNSLOTH_DESKTOP_MODELS = ["default"];
+export const DEFAULT_UNSLOTH_DESKTOP_MODEL = "default";
+
+export const THINKING_LEVELS: ThinkingLevel[] = ["default", "disabled", "low", "medium", "high", "xhigh", "max"];
+
+export const PROVIDERS: Provider[] = ["LM Studio", "Ollama", "Ollama Cloud", "Google", "Cerebras", "Unsloth Desktop"];
 
 export const SOURCE_LANGUAGES: Language[] = [
   "Auto Detect",

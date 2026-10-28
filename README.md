@@ -35,9 +35,9 @@ The app supports OpenAI-compatible chat completion APIs via local providers (LM 
 
 ## Requirements
 
-- Node.js 20 or newer
+- Node.js 20.19+ (20.x), or 22.12+ (22.x and newer)
 - npm
-- Rust toolchain
+- Rust 1.90 or newer
 - A running local LLM provider or cloud provider API key
 
 ### 📥 Download

@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod translation;
+
 use futures_util::StreamExt;
 use regex::Regex;
 use reqwest::Client;
@@ -13,6 +15,7 @@ use std::{
     time::Duration,
 };
 use tauri::{AppHandle, Emitter, State};
+use translation::{create_formatted_prompt, resolve_source_language};
 
 #[cfg(windows)]
 use windows_sys::Win32::{
@@ -589,6 +592,11 @@ async fn translate_file(
 
     let client = Client::new();
     let chunks = split_text_into_chunks(&request.text, request.chunk_size.max(1));
+    let document_source_lang = resolve_source_language(
+        request.source_lang.as_deref().unwrap_or("Auto Detect"),
+        &request.text,
+        "Auto Detect",
+    );
     let total_chunks = chunks.len();
     let start_index = request.start_chunk.unwrap_or(0).min(total_chunks);
     let mut full_translation = request.existing_output.clone().unwrap_or_default();
@@ -633,6 +641,7 @@ async fn translate_file(
             request.source_lang.as_deref().unwrap_or("Auto Detect"),
             &request.target_lang,
             chunk,
+            document_source_lang,
         );
 
         emit_stream(
@@ -860,6 +869,14 @@ async fn run_streaming_chunks(
 
     let client = Client::new();
     let chunks = split_text_into_chunks(&request.text, request.chunk_size.max(1));
+    let document_source_lang = match operation {
+        Operation::Translate => resolve_source_language(
+            request.source_lang.as_deref().unwrap_or("Auto Detect"),
+            &request.text,
+            "Auto Detect",
+        ),
+        Operation::Summarize => "Auto Detect",
+    };
     let total_chunks = chunks.len();
     let start_index = request.start_chunk.unwrap_or(0).min(total_chunks);
     let mut full_output = request.existing_output.clone().unwrap_or_default();
@@ -907,6 +924,7 @@ async fn run_streaming_chunks(
                 request.source_lang.as_deref().unwrap_or("Auto Detect"),
                 &request.target_lang,
                 chunk,
+                document_source_lang,
             ),
             Operation::Summarize => create_summary_prompt(chunk, &request.target_lang),
         };
@@ -1222,40 +1240,10 @@ async fn post_chat_completion(
     Err(format!("HTTP {status}: {body}"))
 }
 
-fn create_formatted_prompt(source_lang: &str, target_lang: &str, text: &str) -> String {
-    let source_code = language_code(source_lang);
-    let target_code = language_code(target_lang);
-
-    if source_lang == "Auto Detect" {
-        return format!(
-            "You are a professional translator. Identify the language of the following text and translate it into {target_lang} ({target_code}). Your goal is to accurately convey the meaning and nuances of the original text while adhering to {target_lang} grammar, vocabulary, and cultural sensitivities.\nProduce only the {target_lang} translation, without any additional explanations or commentary. Please translate the following text into {target_lang}:\n\n{text}"
-        );
-    }
-
-    format!(
-        "You are a professional {source_lang} ({source_code}) to {target_lang} ({target_code}) translator. Your goal is to accurately convey the meaning and nuances of the original {source_lang} text while adhering to {target_lang} grammar, vocabulary, and cultural sensitivities.\nProduce only the {target_lang} translation, without any additional explanations or commentary. Please translate the following {source_lang} text into {target_lang}:\n\n\n{text}"
-    )
-}
-
 fn create_summary_prompt(text: &str, target_lang: &str) -> String {
     format!(
         "You are a professional assistant specializing in text summarization. Please summarize the following text into approximately 3 to 5 concise sentences in {target_lang}. The summary should capture the main points clearly and accurately.\nProvide only the summary without any introductory or concluding remarks.\n\nText to summarize:\n{text}"
     )
-}
-
-fn language_code(language: &str) -> &'static str {
-    match language {
-        "English" => "en",
-        "Korean" => "ko",
-        "Japanese" => "ja",
-        "Chinese (Simplified)" => "zh-Hans",
-        "Chinese (Traditional)" => "zh-Hant",
-        "Spanish" => "es",
-        "French" => "fr",
-        "German" => "de",
-        "Russian" => "ru",
-        _ => "auto",
-    }
 }
 
 fn split_text_into_chunks(text: &str, max_chunk_size: usize) -> Vec<String> {

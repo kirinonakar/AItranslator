@@ -47,6 +47,7 @@ import {
   UNSLOTH_DESKTOP_MODELS,
 } from "./constants";
 import type { AiRequest, DroppedTextFile, FileTranslationResult, Language, Provider, StreamPayload, TabId, Theme, ThinkingLevel } from "./types";
+import { createFormattedPrompt, resolveSourceLanguage } from "./translation";
 
 const clampNumber = (value: number, minimum: number, maximum: number) => {
   if (Number.isNaN(value)) return minimum;
@@ -239,40 +240,6 @@ const fetchProviderModels = async (baseUrl: string, apiKey?: string) => {
   return extractModelNames(await response.json());
 };
 
-const languageCodes: Record<string, string> = {
-  English: "en",
-  Korean: "ko",
-  Japanese: "ja",
-  "Chinese (Simplified)": "zh-Hans",
-  "Chinese (Traditional)": "zh-Hant",
-  Spanish: "es",
-  French: "fr",
-  German: "de",
-  Russian: "ru",
-};
-
-const createFormattedPrompt = (sourceLang: Language, targetLang: Language, text: string) => {
-  const sourceCode = languageCodes[sourceLang] ?? "auto";
-  const targetCode = languageCodes[targetLang] ?? "en";
-
-  if (sourceLang === "Auto Detect") {
-    return (
-      `You are a professional translator. ` +
-      `Identify the language of the following text and translate it into ${targetLang} (${targetCode}). ` +
-      `Your goal is to accurately convey the meaning and nuances of the original text while adhering to ${targetLang} grammar, vocabulary, and cultural sensitivities.\n` +
-      `Produce only the ${targetLang} translation, without any additional explanations or commentary. Please translate the following text into ${targetLang}:\n\n` +
-      text
-    );
-  }
-
-  return (
-    `You are a professional ${sourceLang} (${sourceCode}) to ${targetLang} (${targetCode}) translator. ` +
-    `Your goal is to accurately convey the meaning and nuances of the original ${sourceLang} text while adhering to ${targetLang} grammar, vocabulary, and cultural sensitivities.\n` +
-    `Produce only the ${targetLang} translation, without any additional explanations or commentary. Please translate the following ${sourceLang} text into ${targetLang}:\n\n\n` +
-    text
-  );
-};
-
 const createSummaryPrompt = (text: string, targetLang: Language) =>
   `You are a professional assistant specializing in text summarization. ` +
   `Please summarize the following text into approximately 3 to 5 concise sentences in ${targetLang}. ` +
@@ -446,6 +413,9 @@ const runBrowserTextOperation = async (
   }
 
   const chunks = splitTextIntoChunks(request.text, request.chunkSize);
+  const documentSourceLang = operation === "translate"
+    ? resolveSourceLanguage(request.sourceLang ?? "Auto Detect", request.text)
+    : "Auto Detect";
   const totalChunks = chunks.length;
   const startIndex = request.startChunk ?? 0;
   let fullOutput = request.existingOutput ?? "";
@@ -462,7 +432,7 @@ const runBrowserTextOperation = async (
         : `Summarizing chunk ${index + 1} of ${totalChunks}...`;
     const prompt =
       operation === "translate"
-        ? createFormattedPrompt(request.sourceLang ?? "Auto Detect", request.targetLang, chunk)
+        ? createFormattedPrompt(request.sourceLang ?? "Auto Detect", request.targetLang, chunk, documentSourceLang)
         : createSummaryPrompt(chunk, request.targetLang);
 
     onUpdate(fullOutput, progress);
@@ -499,6 +469,7 @@ const runBrowserFileTranslation = async (
   }
 
   const chunks = splitTextIntoChunks(request.text, request.chunkSize);
+  const documentSourceLang = resolveSourceLanguage(request.sourceLang ?? "Auto Detect", request.text);
   const totalChunks = chunks.length;
   const startIndex = request.startChunk ?? 0;
   let fullTranslation = request.existingOutput ?? "";
@@ -510,7 +481,7 @@ const runBrowserFileTranslation = async (
     onChunkStart?.(index, fullTranslation);
 
     const chunk = chunks[index];
-    const prompt = createFormattedPrompt(request.sourceLang ?? "Auto Detect", request.targetLang, chunk);
+    const prompt = createFormattedPrompt(request.sourceLang ?? "Auto Detect", request.targetLang, chunk, documentSourceLang);
     const progress = `Translating chunk ${index + 1} of ${totalChunks}...`;
     const response = await postBrowserChatCompletion(request, prompt, true, signal);
     let chunkTranslation = "";

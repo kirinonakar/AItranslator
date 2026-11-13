@@ -8,11 +8,12 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
-    collections::HashSet,
+    collections::{hash_map::RandomState, HashSet},
     fs,
+    hash::{BuildHasher, Hasher},
     path::{Path, PathBuf},
-    sync::Mutex,
-    time::Duration,
+    sync::{Mutex, OnceLock},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Emitter, State};
 use translation::{create_formatted_prompt, resolve_source_language};
@@ -37,6 +38,10 @@ const OLLAMA_CLOUD_CREDENTIAL_TARGET: &str = "AI Universal Translator: Ollama Cl
 const OLLAMA_CLOUD_CREDENTIAL_USER: &str = "API Key";
 const UNSLOTH_DESKTOP_CREDENTIAL_TARGET: &str = "AI Universal Translator: Unsloth Desktop API Key";
 const UNSLOTH_DESKTOP_CREDENTIAL_USER: &str = "API Key";
+const OPENCODE_ZEN_CREDENTIAL_TARGET: &str = "AI Universal Translator: OpenCode Zen API Key";
+const OPENCODE_ZEN_CREDENTIAL_USER: &str = "API Key";
+const OPENCODE_GO_CREDENTIAL_TARGET: &str = "AI Universal Translator: OpenCode Go API Key";
+const OPENCODE_GO_CREDENTIAL_USER: &str = "API Key";
 const BEARER_PREFIX: &str = "Bearer ";
 
 #[derive(Default)]
@@ -303,6 +308,128 @@ fn save_unsloth_desktop_api_key(api_key: String) -> Result<(), String> {
     }
 }
 
+#[cfg(windows)]
+#[tauri::command]
+fn load_opencode_zen_api_key() -> Result<String, String> {
+    match read_credential_api_key(OPENCODE_ZEN_CREDENTIAL_TARGET) {
+        Ok(Some(api_key)) => Ok(api_key),
+        Ok(None) => Ok(String::new()),
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+fn load_opencode_zen_api_key() -> Result<String, String> {
+    Ok(String::new())
+}
+
+#[cfg(windows)]
+#[tauri::command]
+fn save_opencode_zen_api_key(api_key: String) -> Result<(), String> {
+    let api_key = normalize_google_api_key(&api_key);
+    if api_key.is_empty() {
+        delete_credential(OPENCODE_ZEN_CREDENTIAL_TARGET)
+    } else {
+        let mut secret = api_key.into_bytes();
+        if secret.len() > CRED_MAX_CREDENTIAL_BLOB_SIZE as usize {
+            return Err(
+                "OpenCode Zen API key is too long for Windows Credential Manager.".to_string(),
+            );
+        }
+
+        let mut target_name = to_wide(OPENCODE_ZEN_CREDENTIAL_TARGET);
+        let mut user_name = to_wide(OPENCODE_ZEN_CREDENTIAL_USER);
+        let mut comment = to_wide("OpenCode Zen API key for AI Universal Translator");
+        let mut credential = CREDENTIALW::default();
+        credential.Type = CRED_TYPE_GENERIC;
+        credential.TargetName = target_name.as_mut_ptr();
+        credential.Comment = comment.as_mut_ptr();
+        credential.CredentialBlobSize = secret.len() as u32;
+        credential.CredentialBlob = secret.as_mut_ptr();
+        credential.Persist = CRED_PERSIST_LOCAL_MACHINE;
+        credential.UserName = user_name.as_mut_ptr();
+
+        let ok = unsafe { CredWriteW(&credential, 0) };
+        if ok == 0 {
+            Err(credential_error("write", unsafe { GetLastError() }))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+fn save_opencode_zen_api_key(api_key: String) -> Result<(), String> {
+    if normalize_google_api_key(&api_key).is_empty() {
+        Ok(())
+    } else {
+        Err("Windows Credential Manager is only available on Windows.".to_string())
+    }
+}
+
+#[cfg(windows)]
+#[tauri::command]
+fn load_opencode_go_api_key() -> Result<String, String> {
+    match read_credential_api_key(OPENCODE_GO_CREDENTIAL_TARGET) {
+        Ok(Some(api_key)) => Ok(api_key),
+        Ok(None) => Ok(String::new()),
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+fn load_opencode_go_api_key() -> Result<String, String> {
+    Ok(String::new())
+}
+
+#[cfg(windows)]
+#[tauri::command]
+fn save_opencode_go_api_key(api_key: String) -> Result<(), String> {
+    let api_key = normalize_google_api_key(&api_key);
+    if api_key.is_empty() {
+        delete_credential(OPENCODE_GO_CREDENTIAL_TARGET)
+    } else {
+        let mut secret = api_key.into_bytes();
+        if secret.len() > CRED_MAX_CREDENTIAL_BLOB_SIZE as usize {
+            return Err(
+                "OpenCode Go API key is too long for Windows Credential Manager.".to_string(),
+            );
+        }
+
+        let mut target_name = to_wide(OPENCODE_GO_CREDENTIAL_TARGET);
+        let mut user_name = to_wide(OPENCODE_GO_CREDENTIAL_USER);
+        let mut comment = to_wide("OpenCode Go API key for AI Universal Translator");
+        let mut credential = CREDENTIALW::default();
+        credential.Type = CRED_TYPE_GENERIC;
+        credential.TargetName = target_name.as_mut_ptr();
+        credential.Comment = comment.as_mut_ptr();
+        credential.CredentialBlobSize = secret.len() as u32;
+        credential.CredentialBlob = secret.as_mut_ptr();
+        credential.Persist = CRED_PERSIST_LOCAL_MACHINE;
+        credential.UserName = user_name.as_mut_ptr();
+
+        let ok = unsafe { CredWriteW(&credential, 0) };
+        if ok == 0 {
+            Err(credential_error("write", unsafe { GetLastError() }))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+fn save_opencode_go_api_key(api_key: String) -> Result<(), String> {
+    if normalize_google_api_key(&api_key).is_empty() {
+        Ok(())
+    } else {
+        Err("Windows Credential Manager is only available on Windows.".to_string())
+    }
+}
+
 fn load_gemini_api_key_from_file() -> String {
     candidate_paths("gemini.txt")
         .into_iter()
@@ -505,6 +632,9 @@ async fn fetch_provider_models(
         .unwrap_or_default();
     if !api_key.is_empty() {
         request = request.bearer_auth(api_key);
+    }
+    if is_opencode_base_url(&base_url) {
+        request = request.header("x-opencode-session", opencode_session_id());
     }
 
     let response = request.send().await.map_err(|error| error.to_string())?;
@@ -1132,6 +1262,37 @@ fn parse_sse_delta(line: &str) -> Result<Option<String>, String> {
         .map(ToOwned::to_owned))
 }
 
+fn is_opencode_provider(provider: &str) -> bool {
+    provider.eq_ignore_ascii_case("OpenCode Zen")
+        || provider.eq_ignore_ascii_case("OpenCodeZen")
+        || provider.eq_ignore_ascii_case("OpenCode Go")
+        || provider.eq_ignore_ascii_case("OpenCodeGo")
+}
+
+fn is_opencode_base_url(base_url: &str) -> bool {
+    base_url.trim().to_ascii_lowercase().contains("opencode.ai/zen")
+}
+
+// OpenCode Zen/Go reject requests without `x-opencode-session` (400 MissingSessionID).
+// The value only needs to be stable for the app process so prompt caching can be reused.
+fn opencode_session_id() -> &'static str {
+    static SESSION_ID: OnceLock<String> = OnceLock::new();
+    SESSION_ID.get_or_init(|| {
+        let mut hasher = RandomState::new().build_hasher();
+        hasher.write_u64(std::process::id() as u64);
+        if let Ok(elapsed) = SystemTime::now().duration_since(UNIX_EPOCH) {
+            hasher.write_u128(elapsed.as_nanos());
+        }
+        let first = hasher.finish();
+
+        let mut second_hasher = RandomState::new().build_hasher();
+        second_hasher.write_u64(first);
+        let second = second_hasher.finish();
+
+        format!("ses_{first:016x}{second:016x}")
+    })
+}
+
 async fn post_chat_completion(
     client: &Client,
     request: &AiRequest,
@@ -1190,6 +1351,34 @@ async fn post_chat_completion(
         } else {
             request_api_key
         }
+    } else if request.provider.eq_ignore_ascii_case("OpenCode Zen")
+        || request.provider.eq_ignore_ascii_case("OpenCodeZen")
+    {
+        let request_api_key = request
+            .api_key
+            .as_deref()
+            .map(normalize_google_api_key)
+            .unwrap_or_default();
+        if request_api_key.is_empty() {
+            read_credential_api_key(OPENCODE_ZEN_CREDENTIAL_TARGET)
+                .map(|key| key.unwrap_or_default())?
+        } else {
+            request_api_key
+        }
+    } else if request.provider.eq_ignore_ascii_case("OpenCode Go")
+        || request.provider.eq_ignore_ascii_case("OpenCodeGo")
+    {
+        let request_api_key = request
+            .api_key
+            .as_deref()
+            .map(normalize_google_api_key)
+            .unwrap_or_default();
+        if request_api_key.is_empty() {
+            read_credential_api_key(OPENCODE_GO_CREDENTIAL_TARGET)
+                .map(|key| key.unwrap_or_default())?
+        } else {
+            request_api_key
+        }
     } else if request.provider.eq_ignore_ascii_case("Ollama") {
         DEFAULT_OLLAMA_API_KEY.to_string()
     } else {
@@ -1223,10 +1412,16 @@ async fn post_chat_completion(
         }
     }
 
-    let response = client
+    let mut http_request = client
         .post(chat_endpoint(&request.base_url))
         .bearer_auth(api_key)
-        .json(&body)
+        .json(&body);
+
+    if is_opencode_provider(&request.provider) || is_opencode_base_url(&request.base_url) {
+        http_request = http_request.header("x-opencode-session", opencode_session_id());
+    }
+
+    let response = http_request
         .send()
         .await
         .map_err(|error| error.to_string())?;
@@ -1344,6 +1539,13 @@ fn models_endpoint(base_url: &str) -> String {
     }
 }
 
+fn supports_chat_completions(model: &Value) -> bool {
+    match model.get("api") {
+        Some(api) => api.get("chat-completions").is_some(),
+        None => true,
+    }
+}
+
 fn parse_model_names(payload: &Value) -> Vec<String> {
     let openai_models = payload
         .get("data")
@@ -1351,6 +1553,7 @@ fn parse_model_names(payload: &Value) -> Vec<String> {
         .map(|items| {
             items
                 .iter()
+                .filter(|item| supports_chat_completions(item))
                 .filter_map(|item| {
                     item.get("id")
                         .and_then(Value::as_str)
@@ -1424,6 +1627,14 @@ fn format_stream_error(
         || request.provider.eq_ignore_ascii_case("Unsloth")
     {
         "Please ensure Unsloth Desktop is running, the endpoint is correct, and your API Key is valid.".to_string()
+    } else if request.provider.eq_ignore_ascii_case("OpenCode Zen")
+        || request.provider.eq_ignore_ascii_case("OpenCodeZen")
+    {
+        "Please ensure OpenCode Zen endpoint is correct and your API Key is valid.".to_string()
+    } else if request.provider.eq_ignore_ascii_case("OpenCode Go")
+        || request.provider.eq_ignore_ascii_case("OpenCodeGo")
+    {
+        "Please ensure OpenCode Go endpoint is correct and your API Key is valid.".to_string()
     } else {
         "Please ensure Google endpoint is correct and your API Key is valid.".to_string()
     };
@@ -1575,6 +1786,10 @@ fn main() {
             save_ollama_cloud_api_key,
             load_unsloth_desktop_api_key,
             save_unsloth_desktop_api_key,
+            load_opencode_zen_api_key,
+            save_opencode_zen_api_key,
+            load_opencode_go_api_key,
+            save_opencode_go_api_key,
             fetch_provider_models,
             translate_text,
             summarize_text,

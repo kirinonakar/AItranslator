@@ -1,7 +1,22 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { randomBytes } from "node:crypto";
 
 const DEFAULT_BASE_URL = "http://localhost:1234/v1";
+
+// OpenCode Zen/Go reject requests without this header (400 MissingSessionID).
+const openCodeSessionId = `ses_${randomBytes(16).toString("hex")}`;
+
+const isOpenCodeBaseUrl = (baseUrl: string) => {
+  try {
+    return /(^|\.)opencode\.ai$/i.test(new URL(baseUrl).hostname);
+  } catch {
+    return false;
+  }
+};
+
+const openCodeSessionHeaders = (baseUrl: string): Record<string, string> =>
+  isOpenCodeBaseUrl(baseUrl) ? { "x-opencode-session": openCodeSessionId } : {};
 
 const modelsEndpoint = (baseUrl: string) => {
   const trimmed = baseUrl.trim().replace(/\/+$/, "");
@@ -48,6 +63,7 @@ export default defineConfig({
               headers: {
                 accept: "application/json",
                 ...(authorization ? { authorization } : {}),
+                ...openCodeSessionHeaders(baseUrl),
               },
             });
             const body = await upstream.text();
@@ -99,6 +115,7 @@ export default defineConfig({
                 accept: "text/event-stream, application/json",
                 authorization: bearerAuthorization(proxyRequest.apiKey),
                 "content-type": "application/json",
+                ...openCodeSessionHeaders(baseUrl),
               },
               body: JSON.stringify(proxyRequest.body ?? {}),
             });

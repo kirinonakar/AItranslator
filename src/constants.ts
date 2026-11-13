@@ -50,9 +50,40 @@ export const UNSLOTH_DESKTOP_BASE_URL = "http://localhost:8888/v1";
 export const UNSLOTH_DESKTOP_MODELS = ["default"];
 export const DEFAULT_UNSLOTH_DESKTOP_MODEL = "default";
 
+export const OPENCODE_ZEN_BASE_URL = "https://opencode.ai/zen/v1";
+export const OPENCODE_ZEN_MODELS = [
+  "glm-5",
+  "kimi-k2.5",
+  "minimax-m2.5",
+  "deepseek-v4-flash",
+  "qwen3-coder",
+  "big-pickle",
+];
+export const DEFAULT_OPENCODE_ZEN_MODEL = "glm-5";
+
+export const OPENCODE_GO_BASE_URL = "https://opencode.ai/zen/go/v1";
+export const OPENCODE_GO_MODELS = [
+  "glm-5",
+  "kimi-k2.5",
+  "kimi-k2.6",
+  "deepseek-v4-flash",
+  "deepseek-v4-pro",
+  "mimo-v2.5",
+];
+export const DEFAULT_OPENCODE_GO_MODEL = "glm-5";
+
 export const THINKING_LEVELS: ThinkingLevel[] = ["default", "disabled", "low", "medium", "high", "xhigh", "max"];
 
-export const PROVIDERS: Provider[] = ["LM Studio", "Ollama", "Ollama Cloud", "Google", "Cerebras", "Unsloth Desktop"];
+export const PROVIDERS: Provider[] = [
+  "LM Studio",
+  "Ollama",
+  "Ollama Cloud",
+  "Google",
+  "Cerebras",
+  "Unsloth Desktop",
+  "OpenCode Zen",
+  "OpenCode Go",
+];
 
 export const SOURCE_LANGUAGES: Language[] = [
   "Auto Detect",

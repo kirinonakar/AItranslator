@@ -30,6 +30,8 @@ import {
   DEFAULT_OLLAMA_API_KEY,
   DEFAULT_OLLAMA_CLOUD_MODEL,
   DEFAULT_OLLAMA_MODEL,
+  DEFAULT_OPENCODE_GO_MODEL,
+  DEFAULT_OPENCODE_ZEN_MODEL,
   DEFAULT_UNSLOTH_DESKTOP_MODEL,
   GOOGLE_BASE_URL,
   GOOGLE_MODELS,
@@ -38,6 +40,10 @@ import {
   OLLAMA_CLOUD_BASE_URL,
   OLLAMA_CLOUD_MODELS,
   OLLAMA_MODELS,
+  OPENCODE_GO_BASE_URL,
+  OPENCODE_GO_MODELS,
+  OPENCODE_ZEN_BASE_URL,
+  OPENCODE_ZEN_MODELS,
   PROVIDERS,
   SOURCE_LANGUAGES,
   SUPPORTED_FILE_TYPES,
@@ -78,6 +84,8 @@ const getProviderBaseUrl = (provider: Provider) => {
   if (provider === "Ollama") return OLLAMA_BASE_URL;
   if (provider === "Ollama Cloud") return OLLAMA_CLOUD_BASE_URL;
   if (provider === "Unsloth Desktop") return UNSLOTH_DESKTOP_BASE_URL;
+  if (provider === "OpenCode Zen") return OPENCODE_ZEN_BASE_URL;
+  if (provider === "OpenCode Go") return OPENCODE_GO_BASE_URL;
   return DEFAULT_BASE_URL;
 };
 
@@ -87,6 +95,8 @@ const getProviderModels = (provider: Provider) => {
   if (provider === "Ollama") return OLLAMA_MODELS;
   if (provider === "Ollama Cloud") return OLLAMA_CLOUD_MODELS;
   if (provider === "Unsloth Desktop") return UNSLOTH_DESKTOP_MODELS;
+  if (provider === "OpenCode Zen") return OPENCODE_ZEN_MODELS;
+  if (provider === "OpenCode Go") return OPENCODE_GO_MODELS;
   return LM_STUDIO_MODELS;
 };
 
@@ -96,6 +106,8 @@ const getProviderDefaultModel = (provider: Provider) => {
   if (provider === "Ollama") return DEFAULT_OLLAMA_MODEL;
   if (provider === "Ollama Cloud") return DEFAULT_OLLAMA_CLOUD_MODEL;
   if (provider === "Unsloth Desktop") return DEFAULT_UNSLOTH_DESKTOP_MODEL;
+  if (provider === "OpenCode Zen") return DEFAULT_OPENCODE_ZEN_MODEL;
+  if (provider === "OpenCode Go") return DEFAULT_OPENCODE_GO_MODEL;
   return LM_STUDIO_MODELS[0];
 };
 
@@ -104,8 +116,20 @@ const includeSelectedModel = (models: string[], selectedModel: string) => {
   return [selectedModel, ...models];
 };
 
-const providerRequiresApiKey = (provider: Provider) => provider === "Google" || provider === "Cerebras" || provider === "Ollama Cloud" || provider === "Unsloth Desktop";
-const providerSupportsModelSync = (provider: Provider) => provider === "LM Studio" || provider === "Ollama" || provider === "Ollama Cloud" || provider === "Unsloth Desktop";
+const providerRequiresApiKey = (provider: Provider) =>
+  provider === "Google" ||
+  provider === "Cerebras" ||
+  provider === "Ollama Cloud" ||
+  provider === "Unsloth Desktop" ||
+  provider === "OpenCode Zen" ||
+  provider === "OpenCode Go";
+const providerSupportsModelSync = (provider: Provider) =>
+  provider === "LM Studio" ||
+  provider === "Ollama" ||
+  provider === "Ollama Cloud" ||
+  provider === "Unsloth Desktop" ||
+  provider === "OpenCode Zen" ||
+  provider === "OpenCode Go";
 const providerUsesCuratedModelList = (provider: Provider) => provider === "Google" || provider === "Cerebras";
 
 const getStoredModel = (provider: Provider) => {
@@ -134,6 +158,12 @@ const getProviderApiKeyCommands = (provider: Provider) => {
   if (provider === "Unsloth Desktop") {
     return { load: "load_unsloth_desktop_api_key", save: "save_unsloth_desktop_api_key", label: "Unsloth Desktop" };
   }
+  if (provider === "OpenCode Zen") {
+    return { load: "load_opencode_zen_api_key", save: "save_opencode_zen_api_key", label: "OpenCode Zen" };
+  }
+  if (provider === "OpenCode Go") {
+    return { load: "load_opencode_go_api_key", save: "save_opencode_go_api_key", label: "OpenCode Go" };
+  }
   return null;
 };
 
@@ -146,6 +176,8 @@ const readInitialProvider = (): Provider => {
   if (normalized === "ollama") return "Ollama";
   if (normalized === "ollama cloud" || normalized === "ollamacloud") return "Ollama Cloud";
   if (normalized === "unsloth desktop" || normalized === "unslothdesktop" || normalized === "unsloth") return "Unsloth Desktop";
+  if (normalized === "opencode zen" || normalized === "opencodezen" || normalized === "zen") return "OpenCode Zen";
+  if (normalized === "opencode go" || normalized === "opencodego" || normalized === "go") return "OpenCode Go";
   if (normalized === "lm studio" || normalized === "lmstudio") return "LM Studio";
   return "LM Studio";
 };
@@ -210,11 +242,15 @@ const writeClipboardText = (text: string) => {
 const extractModelNames = (payload: unknown) => {
   if (!payload || typeof payload !== "object") return [];
   const record = payload as {
-    data?: Array<{ id?: string }>;
+    data?: Array<{ id?: string; api?: Record<string, unknown> }>;
     models?: Array<{ name?: string; model?: string }>;
   };
 
-  const openAiModels = record.data?.map((model) => model.id).filter((id): id is string => Boolean(id)) ?? [];
+  const openAiModels =
+    record.data
+      ?.filter((model) => !model.api || "chat-completions" in model.api)
+      .map((model) => model.id)
+      .filter((id): id is string => Boolean(id)) ?? [];
   if (openAiModels.length > 0) return openAiModels;
 
   return record.models
@@ -521,6 +557,8 @@ function App() {
   const [ollamaModel, setOllamaModel] = useState<string>(() => getStoredModel("Ollama"));
   const [ollamaCloudModel, setOllamaCloudModel] = useState<string>(() => getStoredModel("Ollama Cloud"));
   const [unslothDesktopModel, setUnslothDesktopModel] = useState<string>(() => getStoredModel("Unsloth Desktop"));
+  const [opencodeZenModel, setOpenCodeZenModel] = useState<string>(() => getStoredModel("OpenCode Zen"));
+  const [opencodeGoModel, setOpenCodeGoModel] = useState<string>(() => getStoredModel("OpenCode Go"));
 
   const modelName =
     provider === "Google"
@@ -533,7 +571,11 @@ function App() {
             ? ollamaCloudModel
             : provider === "Unsloth Desktop"
               ? unslothDesktopModel
-              : lmStudioModel;
+              : provider === "OpenCode Zen"
+                ? opencodeZenModel
+                : provider === "OpenCode Go"
+                  ? opencodeGoModel
+                  : lmStudioModel;
 
 
   const [temperature, setTemperature] = useState(0.3);
@@ -647,6 +689,20 @@ function App() {
       localStorage.setItem("modelName", unslothDesktopModel);
     }
   }, [unslothDesktopModel, provider]);
+
+  useEffect(() => {
+    localStorage.setItem("modelName_OpenCode Zen", opencodeZenModel);
+    if (provider === "OpenCode Zen") {
+      localStorage.setItem("modelName", opencodeZenModel);
+    }
+  }, [opencodeZenModel, provider]);
+
+  useEffect(() => {
+    localStorage.setItem("modelName_OpenCode Go", opencodeGoModel);
+    if (provider === "OpenCode Go") {
+      localStorage.setItem("modelName", opencodeGoModel);
+    }
+  }, [opencodeGoModel, provider]);
 
   useEffect(() => {
     localStorage.setItem("thinking", thinking);
@@ -823,13 +879,15 @@ function App() {
   const syncModels = useCallback(async (options?: { automatic?: boolean }) => {
     if (!providerSupportsModelSync(provider)) return;
 
+    if (providerRequiresApiKey(provider) && !normalizeApiKey(apiKey)) {
+      if (!options?.automatic) setNotice(`Enter your ${provider} API Key to fetch models.`);
+      return;
+    }
+
     setIsSyncingModels(true);
     setNotice(options?.automatic ? `Auto-syncing ${provider} models...` : `Fetching models from ${provider}...`);
     try {
-      const fetchedModels = await fetchProviderModels(
-        baseUrl,
-        provider === "Ollama Cloud" || provider === "Unsloth Desktop" ? apiKey : undefined,
-      );
+      const fetchedModels = await fetchProviderModels(baseUrl, providerRequiresApiKey(provider) ? apiKey : undefined);
       if (fetchedModels.length === 0) {
         setNotice(`Could not fetch models from ${provider}.`);
         return;
@@ -842,6 +900,10 @@ function App() {
         setOllamaCloudModel((prev) => (fetchedModels.includes(prev) ? prev : fetchedModels[0]));
       } else if (provider === "Unsloth Desktop") {
         setUnslothDesktopModel((prev) => (fetchedModels.includes(prev) ? prev : fetchedModels[0]));
+      } else if (provider === "OpenCode Zen") {
+        setOpenCodeZenModel((prev) => (fetchedModels.includes(prev) ? prev : fetchedModels[0]));
+      } else if (provider === "OpenCode Go") {
+        setOpenCodeGoModel((prev) => (fetchedModels.includes(prev) ? prev : fetchedModels[0]));
       } else {
         setLmStudioModel((prev) => (fetchedModels.includes(prev) ? prev : fetchedModels[0]));
       }
@@ -1286,7 +1348,7 @@ function App() {
               <label className="field">
                 <div className="field-heading">
                   <span>Provider</span>
-                  <span className="status-chip provider-status">{notice}</span>
+                  <span className="status-chip provider-status" title={notice}>{notice}</span>
                 </div>
                 <select value={provider} onChange={(event) => setProvider(event.target.value as Provider)}>
                   {PROVIDERS.map((item) => (
@@ -1325,6 +1387,10 @@ function App() {
                       setOllamaCloudModel(val);
                     } else if (provider === "Unsloth Desktop") {
                       setUnslothDesktopModel(val);
+                    } else if (provider === "OpenCode Zen") {
+                      setOpenCodeZenModel(val);
+                    } else if (provider === "OpenCode Go") {
+                      setOpenCodeGoModel(val);
                     } else {
                       setLmStudioModel(val);
                     }

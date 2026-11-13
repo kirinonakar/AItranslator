@@ -1,4 +1,4 @@
-export type Provider = "LM Studio" | "Ollama" | "Ollama Cloud" | "Google" | "Cerebras" | "Unsloth Desktop";
+export type Provider = "LM Studio" | "Ollama" | "Ollama Cloud" | "Google" | "Cerebras" | "Unsloth Desktop" | "OpenCode Zen" | "OpenCode Go";
 export type ThinkingLevel = "default" | "disabled" | "low" | "medium" | "high" | "xhigh" | "max";
 export type Language =
   | "Auto Detect"

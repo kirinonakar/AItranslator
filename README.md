@@ -2,7 +2,7 @@
 
 AI Universal Translator is a desktop translation and summarization app built with Tauri, Rust, TypeScript, and React.
 
-The app supports OpenAI-compatible chat completion APIs via local providers (LM Studio, Ollama) and cloud providers (Google Gemini, Cerebras, Ollama Cloud).
+The app supports OpenAI-compatible chat completion APIs via local providers (LM Studio, Ollama) and cloud providers (Google Gemini, Cerebras, Ollama Cloud, OpenCode Zen, OpenCode Go).
 
 ![UI Preview](screenshot.png)
 
@@ -12,8 +12,8 @@ The app supports OpenAI-compatible chat completion APIs via local providers (LM 
 - Text summarization with streaming output
 - UTF-8 text file translation
 - Automatic chunking for long text and large files
-- Multiple provider support: Local (LM Studio, Ollama) & Cloud (Google Gemini, Cerebras, Ollama Cloud)
-- Local model list auto-sync (LM Studio, Ollama, Ollama Cloud)
+- Multiple provider support: Local (LM Studio, Ollama) & Cloud (Google Gemini, Cerebras, Ollama Cloud, OpenCode Zen, OpenCode Go)
+- Model list auto-sync (LM Studio, Ollama, Ollama Cloud, Unsloth Desktop, OpenCode Zen, OpenCode Go)
 - Secure API key storage via Windows Credential Manager for cloud providers
 - Automatic API key migration from `gemini.txt` for Google Gemini
 - Source language auto-detection option
@@ -89,6 +89,8 @@ npm run tauri:build
 * **Cerebras**: Uses `https://api.cerebras.ai/v1`.
 * **Ollama Cloud**: Uses `https://ollama.com/v1`. Supports model sync.
 * **Unsloth Desktop**: Uses `http://localhost:8888/v1` by default, with a Bearer API key and model sync.
+* **OpenCode Zen**: Uses `https://opencode.ai/zen/v1` with an OpenCode API key from the OpenCode console. Supports model sync (chat completions models only).
+* **OpenCode Go**: Uses `https://opencode.ai/zen/go/v1` with the API key from an OpenCode Go subscription. Supports model sync (chat completions models only).
 
 ## Supported Languages
 
